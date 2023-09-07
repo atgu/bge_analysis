@@ -27,7 +27,8 @@ def create_binary_ref(ref_bcf, genetic_map, chr, regs, rege, irg, org):
     j = b.new_job(name=f'create binary ref panel - {chr}:{regs}-{rege}')  # define job
     j.cpu(4)
     j.storage('10Gi')
-    j.image('docker.io/simrub/glimpse:v2.0.0-27-g0919952_20221207')  # Docker image with GLIMPSE2
+    j.image('docker.io/imary116/glimpse2:with-bcftools-and-updated-info-score') # Docker image with GLIMPSE2 with INFO score corrected
+    #j.image('docker.io/simrub/glimpse:v2.0.0-27-g0919952_20221207')  # Docker image with GLIMPSE2
 
     j.command(f''' GLIMPSE2_split_reference --reference {ref_bcf['bcf']} \
         --map {genetic_map} \
@@ -45,7 +46,8 @@ def glimpse2_phase(cram_list, ref_binary, chr, regs, rege, storage_size):
     j.cpu(4)
     j.storage(f'{storage_size}Gi')  # increase storage
     j.memory('highmem')
-    j.image('docker.io/simrub/glimpse:v2.0.0-27-g0919952_20221207')  # Docker image with GLIMPSE2 and bcftools
+    j.image('docker.io/imary116/glimpse2:with-bcftools-and-updated-info-score')  # Docker image with GLIMPSE2 with INFO score corrected
+    #j.image('docker.io/simrub/glimpse:v2.0.0-27-g0919952_20221207')  # Docker image with GLIMPSE2 and bcftools
 
     # output handler
     j.declare_resource_group(ofile={
@@ -72,7 +74,8 @@ def glimpse2_phase(cram_list, ref_binary, chr, regs, rege, storage_size):
 def ligate_chunks(imputed_chunk_list, chr):
     j = b.new_job(name=f'ligate chunks - {chr}')  # define job
     j.cpu(2)
-    j.image('docker.io/simrub/glimpse:v2.0.0-27-g0919952_20221207')  # Docker image with GLIMPSE and bcftools
+    j.image('docker.io/imary116/glimpse2:with-bcftools-and-updated-info-score')  # Docker image with GLIMPSE2 with INFO score corrected
+    #j.image('docker.io/simrub/glimpse:v2.0.0-27-g0919952_20221207')  # Docker image with GLIMPSE and bcftools
 
     # output handler
     j.declare_resource_group(ofile={
@@ -99,7 +102,7 @@ if __name__ == '__main__':
     # do this for each chromosome - one batch per chr
     for n in range(1, 23):
 
-        b = hb.Batch(backend=backend, name=f'GLIMPSE2-chr{n}-impute&ligate-20KEMRI')  # define batch for each chromosome
+        b = hb.Batch(backend=backend, name=f'GLIMPSE2-chr{n}-20KEMRI-CORRECTED_INFO_SCORE')  # define batch for each chromosome
 
         # a reference panel of haplotypes (only bi-allelic snps) -  files obtained from running ref_qc.py
         bcf_path = f'gs://bge/reference_panel/hgdp.tgp.trio/hgdp.tgp.chr{n}.onlysnps.bcf'
