@@ -6,7 +6,7 @@ __author__ = 'Mary T. Yohannes'
 # # Convert the reference panel into GLIMPSE2’s binary file format
 # # Impute and phase a whole chromosome
 # # Ligate imputed chunks of the the same chromosome
-### Based on the tutorial probided here https://odelaneau.github.io/GLIMPSE/docs/tutorials/getting_started/
+### Based on the tutorial provided here https://odelaneau.github.io/GLIMPSE/docs/tutorials/getting_started/
 
 import hailtop.batch as hb
 import subprocess
