@@ -60,7 +60,7 @@ def glimpse2_phase(gl_vcf, ref_binary, chr, regs, rege, storage_size):
         'bcf.csi': '{root}.bcf.csi'})
 
     # run GLIMPSE2_phase
-    j.command(f''' GLIMPSE2_phase --input-gl {gl_vcf['vcf.gz']} \ # input is gl from GLIMPSE1
+    j.command(f''' GLIMPSE2_phase --input-gl {gl_vcf['vcf.gz']} \
     --reference {ref_binary} \
     --threads 4 \
     --output {j.ofile['bcf']} ''')
