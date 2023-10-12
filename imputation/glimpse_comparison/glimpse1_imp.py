@@ -8,7 +8,7 @@ import os
 import hail as hl
 import pandas as pd
 
-# In this script, you'll find how to (using GLIMPSE):
+# In this script, you'll find how to (using GLIMPSE1):
 # # Impute and phase chromosome chunks
 # # Ligate the imputed chunks back together per chromosome
 ### Based on the tutorial probided here https://odelaneau.github.io/GLIMPSE/glimpse1/tutorial_b38.html#run_preliminaries

@@ -2,7 +2,7 @@ __author__ = 'Mary T. Yohannes'
 
 ### GLIMPSE2 SCRIPT #1 ###
 
-# In this script, you'll find how to (using GLIMPSE2 and bcftools):
+# In this script, you'll find how to (using GLIMPSE2):
 # # Convert the reference panel into GLIMPSE2’s binary file format
 # # Impute and phase chromosome chunks using the genotype likelihoods generated for GLIMPSE1
 # # Ligate the imputed chunks back together per chromosome
