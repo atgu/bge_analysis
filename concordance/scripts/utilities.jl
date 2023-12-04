@@ -6,16 +6,15 @@ using Statistics
 using ProgressMeter
 
 """
-The SNP struct defines a "SNP" supporting equality comparisons. We can compare if 2 SNP
-is the same by checking chr, pos, ref, and alt. For 2 SNPs to be considered equal, they
-must have the same chr and pos, but if ref/alt is flipped, we still consider them the 
-"same SNP". If we have a `Vector{SNP}`, then `indexin` and `intersect` are overloaded from
-Julia Base. 
+The SNP struct defines a "SNP" supporting equality comparisons. We can compare
+if 2 SNP is the same by checking chr, pos, ref, and alt. For 2 SNPs to be 
+considered equal, they must have the same chr and pos, but if ref/alt is
+flipped, we still consider them the "same SNP". If we have a `Vector{SNP}`, 
+then `indexin` and `intersect` are overloaded from Julia Base. 
 
-Note: if a record is multiallelic (which shouldn't happen with imputation, but these
-exist in the exome), then there will be multiple alt alleles. One can still use the SNP 
-struct by combining the "sorted" alt alleles via ','. For example, if a SNP have ALT 
-alleles 'T' and 'A', then the `alt == "A,T"`
+Note: if a record is multiallelic, then there will be multiple alt alleles. One
+can still use the SNP struct by combining the "sorted" alt alleles via ','. For 
+example, if a SNP have ALT alleles 'T' and 'A', then the `alt == "A,T"`
 """
 struct SNP
     chr::String
@@ -24,8 +23,7 @@ struct SNP
     alt::String
 end
 # more complex constructors
-function SNP(chr::Int, pos::Int, ref::AbstractString, 
-    alt::AbstractVector)
+function SNP(chr::Int, pos::Int, ref::AbstractString, alt::AbstractVector)
     return SNP(string(chr), pos, ref, join(sort!(alt),','))
 end
 function SNP(chr::AbstractString, pos::Int, ref::AbstractString, alt::AbstractVector)
@@ -83,24 +81,44 @@ function intersect(a::AbstractArray{SNP}, b::AbstractArray{SNP})
 end
 
 """
-    import_Xtrue_Ximp(genotype_file, imputed_file, summary_file; [use_dosage], [exclude_exome_snps])
+    get_AF(x::AbstractMatrix)
+
+Compute alternate allele frequency on dosage matrix `x`, 
+skipping missing values if there are any
+"""
+function get_AF(x::AbstractMatrix)
+    return mean.(skipmissing.(eachcol(x))) ./ 2
+end
+
+"""
+    get_ancestry_names(mspfile::AbstractString)
+
+Reads the super population names from output of `Rfmix2`. Assumes the first line
+takes the form `#Subpopulation order/codes: POP1=0\tPOP2=1\tPOP3=2` for 3 populations
+"""
+function get_ancestry_names(mspfile::AbstractString)
+    l = readline(mspfile)
+    codes = split(l[29:end], '\t')
+    ancestries = [split(code, '=')[1] for code in codes] |> Vector{String}
+    return ancestries
+end
+
+"""
+    import_Xtrue_Ximp(genotype_file, imputed_file, summary_file; [use_dosage])
 
 Imports VCF files `genotype_file` and `imputed_file` into numeric matrices and
 subset them so their are on the same set of SNPs. If REF/ALT is opposite in 
 `genotype_file` and `imputed_file`, we will flip corresponding entries in 
 `genotype_file` so that the dosages from `genotype_file` and genotypes of 
-`imputed_file` can be correlated directly. 
+`imputed_file` can be correlated directly. Minor allele frequency is computed
+based on `imputed_file`
 """
 function import_Xtrue_Ximp(
     genotype_file::String, # VCF (will import GT field)
-    imputed_file::String, # VCF (import DS = dosage field, unless use_dosage=false, in which case we import GT)
-    summary_file::String; # must contain CHR/POS/REF/ALT/AF/isImputed columns
-    use_dosage::Bool=true, 
-    exclude_exome_snps::Bool=true
+    imputed_file::String; # VCF (import DS = dosage field, unless use_dosage=false, in which case we import GT)
+    summary_file::String = "", # must contain CHR/POS/REF/ALT/isImputed columns
+    use_dosage::Bool=true
     )
-    # import summary statistics file
-    summary_df = CSV.read(summary_file, DataFrame)
-
     # import array genotype data
     array_data, array_sampleID, array_chr, array_pos, _, array_ref, array_alt = 
         convert_gt(Float64, genotype_file, save_snp_info=true, 
@@ -113,6 +131,12 @@ function import_Xtrue_Ximp(
         import_func(Float64, imputed_file, save_snp_info=true, 
         msg="Importing imputed VCF")
     imputed_snps = SNPs(imputed_chr, imputed_pos, imputed_ref, imputed_alt)
+    
+    # compute maf (between 0 and 0.5) from imputed data
+    AF = get_AF(imputed_data)
+    MAF = copy(AF)
+    idx = findall(x -> x > 0.5, MAF)
+    MAF[idx] .-= 1 .- MAF[idx]
 
     # shared samples
     shared_samples = intersect(imputed_sampleID, array_sampleID)
@@ -120,14 +144,15 @@ function import_Xtrue_Ximp(
 
     # shared SNPs
     shared_snps = intersect(imputed_snps, array_snps)
-    if exclude_exome_snps
-        exome_idx = findall(x -> x == false, summary_df[!, "isImputed"])
-        exome_chr = summary_df[exome_idx, "CHR"]
-        exome_pos = summary_df[exome_idx, "POS"]
-        exome_ref = summary_df[exome_idx, "REF"]
-        exome_alt = summary_df[exome_idx, "ALT"]
-        exome_snps = SNPs(exome_chr, exome_pos, exome_ref, exome_alt)
-        idx = findall(x -> !(x in exome_snps), shared_snps)
+    if summary_file != ""
+        summary_df = CSV.read(summary_file, DataFrame)
+        keep_idx = findall(x -> x == false, summary_df[!, "isImputed"])
+        keep_chr = summary_df[keep_idx, "CHR"]
+        keep_pos = summary_df[keep_idx, "POS"]
+        keep_ref = summary_df[keep_idx, "REF"]
+        keep_alt = summary_df[keep_idx, "ALT"]
+        keep_snps = SNPs(keep_chr, keep_pos, keep_ref, keep_alt)
+        idx = findall(x -> !(x in keep_snps), shared_snps)
         shared_snps = shared_snps[idx]
     end
     println("matched $(length(shared_snps)) SNPs")
@@ -146,6 +171,7 @@ function import_Xtrue_Ximp(
     imputed_snps = imputed_snps[imputed_col_idx]
     imputed_ref = imputed_ref[imputed_col_idx]
     imputed_alt = imputed_alt[imputed_col_idx]
+    MAF = MAF[imputed_col_idx]
     array_snps = array_snps[array_col_idx]
     for (i, (imputed_snp, genotyped_snp)) in enumerate(zip(imputed_snps, array_snps))
         if (imputed_snp.ref == genotyped_snp.ref) && (imputed_snp.alt == genotyped_snp.alt)
@@ -157,17 +183,6 @@ function import_Xtrue_Ximp(
         end
     end
 
-    # compute maf
-    AF = summary_df[!, "AF"]
-    all_imputed_chr = summary_df[!, "CHR"]
-    all_imputed_pos = summary_df[!, "POS"]
-    all_imputed_ref = summary_df[!, "REF"]
-    all_imputed_alt = summary_df[!, "ALT"]
-    all_imputed_snps = SNPs(all_imputed_chr, all_imputed_pos, all_imputed_ref, all_imputed_alt)
-    MAF = AF[indexin(shared_snps, all_imputed_snps)]
-    MAF[findall(x -> x > 0.5, MAF)] .-= 1 .- MAF[findall(x -> x > 0.5, MAF)]
-    length(MAF) == length(shared_snps) || error("expected length(MAF) == length(shared_snps)")
-
     size(Xgeno) == size(Ximpt) || error("expected size(Xgeno) == size(Ximpt)")
     length(MAF) == length(shared_snps) || error("expected length(MAF) == length(shared_snps)")
     size(Xgeno, 2) == length(shared_snps) || error("expected size(Xgeno, 2) == length(shared_snps)")
@@ -177,13 +192,13 @@ end
 
 function get_aggregate_R2(
     genotype_file::String,
-    imputed_file::String,
-    summary_file::String;
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.00100, 0.00400, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
+    imputed_file::String;
+    summary_file::String = "", # must contain CHR/POS/REF/ALT/isImputed columns
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
     )
     # import data
     Xgeno, Ximpt, mafs, _, _ = import_Xtrue_Ximp(
-        genotype_file, imputed_file, summary_file
+        genotype_file, imputed_file; summary_file=summary_file
     )
 
     # compute aggregate R2
@@ -212,23 +227,28 @@ function get_aggregate_R2(
 end
 
 function get_aggregate_R2(
-    genotype_files::Vector{String},
-    imputed_files::Vector{String},
-    summary_files::Vector{String},
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.00100, 0.00400, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
+    genotype_file::Vector{String},
+    imputed_file::Vector{String};
+    summary_file::Vector{String} = ["" for _ in eachindex(genotype_files)], # must contain CHR/POS/REF/ALT/isImputed columns
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
     )
-    length(genotype_files) == length(imputed_files) == length(summary_files) || 
-        error("get_avgR2: expected genotype_files, imputed_files, summary_files to have the same length")
+    length(genotype_file) == length(imputed_file) == length(summary_file) || 
+        error(
+            "Expected genotype_file, imputed_file, summary_file to have the same length"
+        )
 
     # compute aggregate R2 over all files
     agg_R2 = zeros(length(maf_bins) - 1)
     tot_snps = zeros(Int, length(maf_bins) - 1)
-    @showprogress for (gtfile, impfile, sfile) in zip(genotype_files, imputed_files, summary_files)
-        R2, nsnps = get_aggregate_R2(gtfile, impfile, sfile, maf_bins=maf_bins)
+    @showprogress for (g, i, s) in zip(genotype_file, imputed_file, summary_file)
+        R2, nsnps = get_aggregate_R2(
+            g, i, summary_file=s, maf_bins=maf_bins
+        )
         agg_R2 .+= R2 .* nsnps
         tot_snps .+= nsnps
     end
     agg_R2 ./= tot_snps
+
     return agg_R2, tot_snps
 end
 
@@ -296,15 +316,14 @@ end
 function get_ancestry_specific_r2(
     genotype_file::String, # VCF (will import GT field)
     imputed_file::String, # VCF (import DS field, unless use_dosage=false, in which case we import GT)
-    summary_file::String, # must contain CHR/POS/REF/ALT/AF/isImputed columns
     mspfile::String, # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
-    n_ancestries::Int;
-    use_dosage::Bool=true, 
-    exclude_exome_snps::Bool=true,
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.00100, 0.00400, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
-    ancestry_names::Vector{String} = ["$(ancestry)$(ancestry)" for ancestry in 0:n_ancestries-1]
+    ancestry_names::Vector{String};
+    summary_file::String = "", # must contain CHR/POS/REF/ALT/AF/isImputed columns
+    use_dosage::Bool=true, # whether to import imputed data as dosage or genotypes
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
     )
     # compute background ancestries on the phased genotypes
+    n_ancestries = length(ancestry_names)
     ancestry_masks, _, nsnps = create_LAI_mapping_matrices(
         mspfile, n_ancestries, ancestry_names=ancestry_names)
 
@@ -319,8 +338,8 @@ function get_ancestry_specific_r2(
 
     # import the genotype and imputed data matrices, after matching them
     Xgeno, Ximpt, mafs, samples, snps = import_Xtrue_Ximp(
-        genotype_file, imputed_file, summary_file, use_dosage=use_dosage,
-        exclude_exome_snps=exclude_exome_snps
+        genotype_file, imputed_file, summary_file=summary_file, 
+        use_dosage=use_dosage, 
     )
 
     # Note: background ancestries were computed on the phased genotypes, 
@@ -351,7 +370,7 @@ function get_ancestry_specific_r2(
     end
 
     # loop through each background ancestry
-    nsnps = zeros(length(maf_bins), length(ancestry_masks))
+    nsnps = zeros(length(maf_bins) - 1, length(ancestry_masks))
     counter = 1
     for (ancestry, has_this_ancestry) in ancestry_masks
         # compute aggregate R2
@@ -388,49 +407,51 @@ end
 # number of SNPs in each MAF bin). Thus, this is not a "true aggregate R2" over
 # all files. 
 function get_ancestry_specific_r2(
-    genotype_files::Vector{String}, # VCF files (will import GT field), e.g. one for each chr
-    imputed_files::Vector{String}, # VCF files (import DS field, unless use_dosage=false, in which case we import GT)
-    summary_files::Vector{String}, 
-    mspfile::Vector{String}, # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
-    n_ancestries::Int;
+    genotype_file::Vector{String}, # VCF files (will import GT field), e.g. one for each chr
+    imputed_file::Vector{String}, # VCF files (import DS field, unless use_dosage=false, in which case we import GT)
+    msp_file::Vector{String}, # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
+    ancestry_names::Vector{String};
+    summary_file::Vector{String} = ["" for _ in eachindex(genotype_file)], 
     use_dosage::Bool=true,
-    exclude_exome_snps::Bool=true,
     maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
-    ancestry_names::Vector{String} = ["$(ancestry)$(ancestry)" for ancestry in 0:n_ancestries-1]
     )
     # get ancestry specific R2 for first set of files
     df, nsnps = get_ancestry_specific_r2(
-        genotype_files[1], imputed_files[1], summary_files[1], mspfile[1],
-        n_ancestries, use_dosage=use_dosage, exclude_exome_snps=exclude_exome_snps,
-        maf_bins=maf_bins, ancestry_names=ancestry_names
+        genotype_file[1], imputed_file[1], msp_file[1], ancestry_names, 
+        summary_file = summary_file[1], use_dosage=use_dosage, 
+        maf_bins=maf_bins
     )
-    R2s = df[:, 2:end]
+    R2s = df[:, 2:end] |> Matrix{Float64}
+
+    # if a certain ancestry/maf-bin have 0 SNPs, R2 will be NaN. Set those to 0
+    idx = findall(isnan, R2s)
+    R2s[idx] .= 0
+    nsnps[idx] .= 0
 
     # variable to return: average R2 over all files, accounting bin sizes
     tot_snps = copy(nsnps)
     avg_R2 = copy(R2s) .* tot_snps
 
     # loop over remaining file
-    for i in 2:length(genotype_files)
+    for i in 2:length(genotype_file)
         df, nsnps = get_ancestry_specific_r2(
-            genotype_files[1], imputed_files[1], summary_files[1], mspfile[1],
-            n_ancestries, use_dosage=use_dosage, exclude_exome_snps=exclude_exome_snps,
-            maf_bins=maf_bins, ancestry_names=ancestry_names
+            genotype_file[i], imputed_file[i], msp_file[i], ancestry_names, 
+            summary_file = summary_file[i], use_dosage=use_dosage, 
+            maf_bins=maf_bins, 
         )
-        R2s = df[!, 2:end]
+        R2s = df[!, 2:end] |> Matrix{Float64}
         idx = findall(!isnan, R2s)
 
-        @views avg_R2[idx] .+= R2s[idx] .* nsnps[idx]
-        @views tot_snps[idx] .+= nsnps[idx]
+        avg_R2[idx] .+= R2s[idx] .* nsnps[idx]
+        tot_snps[idx] .+= nsnps[idx]
     end
-    
+
+    # final dataframe
     avg_R2 ./= tot_snps
+    df = copy(df)
+    df[:, 2:end] .= avg_R2
 
-    # add maf labels
-    avg_R2[!, "maf_bins"] = df[!, "maf_bins"]
-    avg_R2 = avg_R2[!, vcat(size(avg_R2, 2), 1:size(avg_R2, 2)-1)] # make maf_bins first column
-
-    return avg_R2, tot_snps
+    return df, tot_snps
 end
 
 function compute_precision_sensitivity(ximp::AbstractMatrix, xtrue::AbstractMatrix)
@@ -501,13 +522,13 @@ end
 
 function compute_non_ref_concordance(
     genotype_file::String, # VCF (will import GT field)
-    imputed_file::String, # VCF (import DS field, unless use_dosage=false, in which case we import GT)
-    summary_file::String; # must contain CHR/POS/REF/ALT/AF/isImputed columns
+    imputed_file::String; # VCF (import DS field, unless use_dosage=false, in which case we import GT)
+    summary_file::String = ""
     )
 
     # import the full genotype and imputed data matrices
     Xgeno, Ximpt, mafs, _, _ = import_Xtrue_Ximp(
-        genotype_file, imputed_file, summary_file, use_dosage=false,
+        genotype_file, imputed_file, summary_file=summary_file, use_dosage=false,
     )
 
     concordance, counters = compute_non_ref_concordance(Ximpt, Xgeno)
@@ -517,14 +538,14 @@ end
 
 function compute_non_ref_concordance(
     genotype_file::Vector{String}, # VCF (will import GT field)
-    imputed_file::Vector{String}, # VCF (import DS field, unless use_dosage=false, in which case we import GT)
-    summary_file::Vector{String}; # must contain CHR/POS/REF/ALT/AF/isImputed columns
+    imputed_file::Vector{String}; # VCF (import DS field, unless use_dosage=false, in which case we import GT)
+    summary_file::Vector{String} = ["" for _ in eachindex(genotype_file)]
     )
     concordances, counters, mafs = Float64[], Int[], Float64[]
     for (gtfile, impfile, summ_file) in zip(genotype_file, imputed_file, summary_file)
         # import the full genotype and imputed data matrices
         Xgeno, Ximpt, mf, _, _ = import_Xtrue_Ximp(
-            gtfile, impfile, summ_file, use_dosage=false,
+            gtfile, impfile, summary_file=summ_file, use_dosage=false,
         )
 
         # compute confordance for current file and save 
