@@ -467,6 +467,10 @@ function compute_precision_sensitivity(ximp::AbstractMatrix, xtrue::AbstractMatr
             # true positives
             if xtrue[i, j] == ximp[i, j] == 1
                 TP += 1
+            elseif xtrue[i, j] == 1 && ximp[i, j] == 2
+                TP += 1
+            elseif xtrue[i, j] == 2 && ximp[i, j] == 1
+                TP += 1
             elseif xtrue[i, j] == ximp[i, j] == 2
                 TP += 2
             end
@@ -509,6 +513,10 @@ function compute_non_ref_concordance(ximp::AbstractMatrix, xtrue::AbstractMatrix
 
             # true positives
             if xtrue[i, j] == ximp[i, j] == 1
+                TP += 1
+            elseif xtrue[i, j] == 1 && ximp[i, j] == 2
+                TP += 1
+            elseif xtrue[i, j] == 2 && ximp[i, j] == 1
                 TP += 1
             elseif xtrue[i, j] == ximp[i, j] == 2
                 TP += 2

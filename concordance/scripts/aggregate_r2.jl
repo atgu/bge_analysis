@@ -45,12 +45,13 @@ input2_isvcf = endswith(input2, ".vcf") || endswith(input2, ".vcf.gz")
 if input1_isvcf && input2_isvcf
     genotype_file = input1
     imputed_file = input2
+    summary_file = parsed_args["summary"]
 elseif !input1_isvcf && !input2_isvcf # input is list of files
     genotype_file = readdlm(input1) |> vec |> Vector{String}
     imputed_file = readdlm(input2) |> vec |> Vector{String}
     summary_file = parsed_args["summary"] == "" ? 
         ["" for _ in eachindex(genotype_file)] : 
-        (readdlm(summary_file) |> vec |> Vector{String})
+        (readdlm(parsed_args["summary"]) |> vec |> Vector{String})
 else
     error(
         "Problem with input. Input 1 and 2 should both be VCF files (ends " * 

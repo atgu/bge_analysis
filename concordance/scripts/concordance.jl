@@ -52,7 +52,7 @@ elseif !input1_isvcf && !input2_isvcf # input is list of files
     imputed_file = readdlm(input2) |> vec |> Vector{String}
     summary_file = parsed_args["summary"] == "" ? 
         ["" for _ in eachindex(genotype_file)] : 
-        (readdlm(summary_file) |> vec |> Vector{String})
+        (readdlm(parsed_args["summary"]) |> vec |> Vector{String})
 else
     error(
         "Problem with input. Input 1 and 2 should both be VCF files (ends " * 

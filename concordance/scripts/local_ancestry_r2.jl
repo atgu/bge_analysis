@@ -62,7 +62,7 @@ elseif !input1_isvcf && !input2_isvcf
     msp_file = readdlm(input3) |> vec |> Vector{String}
     summary_file = parsed_args["summary"] == "" ? 
         ["" for _ in eachindex(genotype_file)] : 
-        (readdlm(summary_file) |> vec |> Vector{String})
+        (readdlm(parsed_args["summary"]) |> vec |> Vector{String})
     ancestry_names = get_ancestry_names(msp_file[1])
 else
     error(
