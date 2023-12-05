@@ -34,7 +34,7 @@ Required arguments:
 + `--out`: Full file path to output file name. Output will be non-reference concordance (i.e the percent of non-reference alleles that were correctly imputed)
 
 Optional arguments include:
-+ `--summary`: An optional input. Either Full file path to a comma or tab separated summary file (header must include at least 6 columns with the names CHR/POS/REF/ALT/AF/isImputed), or a file containing a list of summary files
++ `--summary`: An optional which allows users to NOT consider certain SNPs that exist in ground truth or imputed genotype files. Must be either a full file path to a comma or tab separated summary file (header must include at least 5 columns with the names CHR/POS/REF/ALT/isImputed), or a file containing a list of summary files. The scripts are set up so that only SNPs listed as `true` in the `isImputed` column will be considered. 
 + `--maf-bins`: Comma-separated list of minor allele frequencies used to bin SNPs. Defaults to `0.0,0.0005,0.001,0.004,0.0075,0.0125,0.04,0.1,0.2,0.5`
 
 ## Aggregate R2
@@ -48,7 +48,7 @@ Required arguments:
 + `--out`: Full file path to output file name. Output will be non-reference concordance (i.e the percent of non-reference alleles that were correctly imputed)
 
 Optional arguments include:
-+ `--summary`: An optional input. Either Full file path to a comma or tab separated summary file (header must include at least 6 columns with the names CHR/POS/REF/ALT/AF/isImputed), or a file containing a list of summary files
++ `--summary`: An optional which allows users to NOT consider certain SNPs that exist in ground truth or imputed genotype files. Must be either a full file path to a comma or tab separated summary file (header must include at least 5 columns with the names CHR/POS/REF/ALT/isImputed), or a file containing a list of summary files. The scripts are set up so that only SNPs listed as `true` in the `isImputed` column will be considered. 
 + `--maf-bins`: Comma-separated list of minor allele frequencies used to bin SNPs. Defaults to `0.0,0.0005,0.001,0.004,0.0075,0.0125,0.04,0.1,0.2,0.5`
 
 ## Aggregate R2 based for different local ancestry backgrounds
@@ -68,7 +68,7 @@ Required arguments:
 + `--out`: Full file path to output file name. Output will be non-reference concordance (i.e the percent of non-reference alleles that were correctly imputed)
 
 Optional arguments include:
-+ `--summary`: An optional input. Either Full file path to a comma or tab separated summary file (header must include at least 6 columns with the names CHR/POS/REF/ALT/AF/isImputed), or a file containing a list of summary files
++ `--summary`: An optional which allows users to NOT consider certain SNPs that exist in ground truth or imputed genotype files. Must be either a full file path to a comma or tab separated summary file (header must include at least 5 columns with the names CHR/POS/REF/ALT/isImputed), or a file containing a list of summary files. The scripts are set up so that only SNPs listed as `true` in the `isImputed` column will be considered. 
 + `--maf-bins`: Comma-separated list of minor allele frequencies used to bin SNPs. Defaults to `0.0,0.0005,0.001,0.004,0.0075,0.0125,0.04,0.1,0.2,0.5`
 
 ## Plotting
@@ -78,8 +78,9 @@ Optional arguments include:
 
 ## Memory Requirements and runtime
 
-These scripts import the imputed and ground truth genotypes into numeric matrices (without multithreading). Thus, we *highly* recommend one to separate data by chromosome, and filter the imputed data so that they are on roughly the same set of SNPs as the ground truth data. 
+These scripts import the imputed and ground truth genotypes into double-precision numeric matrices (without multithreading). Thus, we *highly* recommend one to separate data by chromosome, and filter the imputed data so that they are on roughly the same set of SNPs as the ground truth data. 
 
+As a rule of thumb, the provided scripts should take at most an hour on ~1000 samples and ~400k SNPs. A progress bar will be automatically displayed for routines such as importing data. 
 
 ## Bugs, usage difficulties, and feature requests
 
