@@ -1,7 +1,7 @@
 # Evaluating imputation accuracy
 
 We used a few metrics for evaluating GLIMPSE's imputation accuracy:
-1. Non-reference concordance
+1. Concordance (including sensitivity, precision, and non-reference concordance)
 2. Aggregate R2 (squared Pearson's correlation)
 3. Aggregate R2 but stratefying SNPs by their local ancestry backgrounds. 
 
@@ -23,7 +23,7 @@ git clone https://github.com/biona001/bge_analysis.git
 ```
 4. A few scripts is located in `bge_analysis/concordance/scripts`. Follow the examples below to run them for each analysis
 
-## Non-reference concordance
+## Sensitivity, precision, and non-reference concordance
 
 ```shell
 julia concordance.jl --truth file1 --impt file2 --out file3
@@ -36,6 +36,34 @@ Required arguments:
 Optional arguments include:
 + `--summary`: An optional which allows users to NOT consider certain SNPs that exist in ground truth or imputed genotype files. Must be either a full file path to a comma or tab separated summary file (header must include at least 5 columns with the names CHR/POS/REF/ALT/isImputed), or a file containing a list of summary files. The scripts are set up so that only SNPs listed as `true` in the `isImputed` column will be considered. 
 + `--maf-bins`: Comma-separated list of minor allele frequencies used to bin SNPs. Defaults to `0.0,0.0005,0.001,0.004,0.0075,0.0125,0.04,0.1,0.2,0.5`
+
+### Details of sensitivity, precision, and non-reference concordances
+
+For each SNP, we can create the following contingency table:
+
+|       |         | Imputed            | Imputed            |
+|-------|---------|--------------------|--------------------|
+|       |         | ALT (1)            | REF (0)            |
+| truth | ALT (1) | true positive (A)  | false negative (B) |
+| truth | REF (0) | false positive (C) | false negative (D) |
+
+Let 1 = ALT and 0 = REF, then we have the following cases
+
++ truth = 0 and imputed = 0: D += 2
++ truth = 1 and imputed = 0: D += 1 and B += 1
++ truth = 2 and imputed = 0: B += 1
++ truth = 0 and imputed = 1: D += 1 and C += 1
++ truth = 1 and imputed = 1: A += 1 and D += 1
++ truth = 2 and imputed = 1: A += 1 and B += 1
++ truth = 0 and imputed = 2: C += 2
++ truth = 1 and imputed = 2: A += 1 and C += 1
++ truth = 2 and imputed = 2: A += 2
+
+Then
+
++ `Sensitivity` = true positives / (true positives + false negaitves) = A / (A+B). (NOTE that the total number of ALT alleles in the array data is A+B)
++ `Precision` = true positives / (true positives + false positives) = A / (A+C)
++ `Non-reference concordance` = A / (A+B+C). To see why, consider the denominator to be the total number of ALT alleles called the *either* array/truth dataset or imputed dataset, i.e. (A+B+C). The numerator is where they agree, i.e. A.
 
 ## Aggregate R2
 
@@ -78,10 +106,10 @@ Optional arguments include:
 
 ## Memory Requirements and runtime
 
-These scripts import the imputed and ground truth genotypes into double-precision numeric matrices (without multithreading). Thus, we *highly* recommend one to separate data by chromosome, and filter the imputed data so that they are on roughly the same set of SNPs as the ground truth data. 
+These scripts import the imputed and ground truth genotypes into double-precision matrices (without multithreading). Thus, we *highly* recommend one to separate data by chromosome, and filter the imputed data so that they are on roughly the same set of SNPs as the ground truth data. 
 
 As a rule of thumb, the provided scripts should take at most an hour on ~1000 samples and ~400k SNPs. A progress bar will be automatically displayed for routines such as importing data. 
 
-## Bugs, usage difficulties, and feature requests
+## Bugs, usage difficulties, and feature requests?
 
 Please submit an issue for any problems and I will take a look asap. Alternatively, feel free to reach out to Benjamin Chu (bbchu@stanford.edu). 

@@ -38,7 +38,7 @@ function make_aggregate_R2_plots(
     return plt
 end
 
-function make_non_ref_concordance_plot(
+function make_concordance_plots(
     concordance::Vector{T},
     mafs::Vector{T},
     plt_label::String,
@@ -66,7 +66,7 @@ function make_non_ref_concordance_plot(
     return plt
 end
 
-function make_non_ref_concordance_plots(
+function make_concordance_plots(
     concordances::Vector{Vector{T}},
     mafs::Vector{Vector{T}},
     plt_labels::Vector{String},

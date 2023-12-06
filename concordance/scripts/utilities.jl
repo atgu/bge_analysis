@@ -5,80 +5,7 @@ using DelimitedFiles
 using Statistics
 using ProgressMeter
 
-"""
-The SNP struct defines a "SNP" supporting equality comparisons. We can compare
-if 2 SNP is the same by checking chr, pos, ref, and alt. For 2 SNPs to be 
-considered equal, they must have the same chr and pos, but if ref/alt is
-flipped, we still consider them the "same SNP". If we have a `Vector{SNP}`, 
-then `indexin` and `intersect` are overloaded from Julia Base. 
-
-Note: if a record is multiallelic, then there will be multiple alt alleles. One
-can still use the SNP struct by combining the "sorted" alt alleles via ','. For 
-example, if a SNP have ALT alleles 'T' and 'A', then the `alt == "A,T"`
-"""
-struct SNP
-    chr::String
-    pos::Int
-    ref::String
-    alt::String
-end
-# more complex constructors
-function SNP(chr::Int, pos::Int, ref::AbstractString, alt::AbstractVector)
-    return SNP(string(chr), pos, ref, join(sort!(alt),','))
-end
-function SNP(chr::AbstractString, pos::Int, ref::AbstractString, alt::AbstractVector)
-    return SNP(chr, pos, ref, join(sort!(alt),','))
-end
-function SNPs(chrs::AbstractVector, poss::AbstractVector{Int}, 
-    refs::AbstractVector, alts::AbstractVector)
-    snps = SNP[]
-    for (chr, pos, ref, alt) in zip(chrs, poss, refs, alts)
-        push!(snps, SNP(chr, pos, ref, alt))
-    end
-    return snps
-end
-
-# methods supported by SNP struct
-import Base.==, Base.indexin, Base.intersect
-function ==(x::SNP, y::SNP)
-    alleles_match = ((x.ref == y.ref) && (x.alt == y.alt)) || 
-        ((x.ref == y.alt) && (x.alt == y.ref))
-    if (x.chr != y.chr) || (x.pos != y.pos) || !alleles_match
-        return false
-    end
-    return true
-end
-function indexin(a::AbstractArray{SNP}, b::AbstractArray{SNP})
-    # same as Base.index but works on a vector of SNP.
-    # Note to self: it is important to include both SNP(chr, pos, ref, alt) and SNP(chr, pos, alt, ref)
-    # when checking if a SNP exist in the other vector
-    inds = keys(b)
-    bdict = Dict{eltype(b),eltype(inds)}()
-    for (snp, ind) in zip(b, inds)
-        get!(bdict, snp, ind)
-        get!(bdict, SNP(snp.chr, snp.pos, snp.alt, snp.ref), ind)
-    end
-    result = Union{eltype(inds), Nothing}[]
-    for snp in a
-        result1 = get(bdict, snp, nothing)
-        result2 = get(bdict, SNP(snp.chr, snp.pos, snp.alt, snp.ref), nothing)
-        if !isnothing(result1)
-            push!(result, result1)
-        elseif !isnothing(result2)
-            push!(result, result2)
-        else
-            push!(result, nothing)
-        end
-    end
-    return result
-end
-function intersect(a::AbstractArray{SNP}, b::AbstractArray{SNP})
-    c = SNP[]
-    for snp in a
-        snp in b && push!(c, snp)
-    end
-    return unique!(c)
-end
+include("struct.jl")
 
 """
     get_AF(x::AbstractMatrix)
@@ -454,81 +381,92 @@ function get_ancestry_specific_r2(
     return df, tot_snps
 end
 
-function compute_precision_sensitivity(ximp::AbstractMatrix, xtrue::AbstractMatrix)
+"""
+    compute_concordance(ximp::AbstractMatrix, xtrue::AbstractMatrix)
+
+Computes sensitivity, precision, and non-reference concordances. Assume
+we create the following contingency table:
+
+                                        Imputed
+                    |      ALT (1)       |       REF (0)       |
+                    |------------------------------------------|
+            ALT (1) | true positive  (A) | false negative (B)  |
+Truth:              |------------------------------------------|
+            REF (0) | false positive (C) | false negative (D)  |
+                    |------------------------------------------|
+
+Let 1 = ALT and 0 = REF, then we have the following cases
+
++ truth = 0 and imputed = 0: D += 2
++ truth = 1 and imputed = 0: D += 1 and B += 1
++ truth = 2 and imputed = 0: B += 1
++ truth = 0 and imputed = 1: D += 1 and C += 1
++ truth = 1 and imputed = 1: A += 1 and D += 1
++ truth = 2 and imputed = 1: A += 1 and B += 1
++ truth = 0 and imputed = 2: C += 2
++ truth = 1 and imputed = 2: A += 1 and C += 1
++ truth = 2 and imputed = 2: A += 2
+
+Then
+
++ Sensitivity = true positives / (true positives + false negaitves) = A / (A+B)
+    (NOTE that the total number of ALT alleles in the array data is A+B)
++ Precision = true positives / (true positives + false positives) = A / (A+C)
++ Non-reference concordance = A / (A+B+C). To see why, consider the denominator
+    to be the total number of ALT alleles called the *either* array/truth dataset
+    or imputed dataset, i.e. (A+B+C). The numerator is where they agree, i.e. A.
+
+# Returns
+A vector of `ContingencyTable`, one for each SNP. Contingency tables support 
+`sensitivity`, `precision`, and `nonref_concordance` functions, e.g. 
+`sensitivity(x::ContingencyTable)`
+"""
+function compute_concordance(ximp::AbstractMatrix, xtrue::AbstractMatrix)
     size(ximp) == size(xtrue) || error("check dimension")
     n, p = size(ximp)
-    precisions, sensitivities = Float64[], Float64[]
+    contigency_tables = ContingencyTable[]
     for j in 1:p
-        TP, FP, FN = 0, 0, 0
+        A, B, C, D = 0, 0, 0, 0
         for i in 1:n
             ismissing(xtrue[i, j]) && continue
             ismissing(ximp[i, j]) && continue
 
-            # true positives
-            if xtrue[i, j] == ximp[i, j] == 1
-                TP += 1
-            elseif xtrue[i, j] == 1 && ximp[i, j] == 2
-                TP += 1
-            elseif xtrue[i, j] == 2 && ximp[i, j] == 1
-                TP += 1
-            elseif xtrue[i, j] == ximp[i, j] == 2
-                TP += 2
-            end
-
-            # false positives
-            if xtrue[i, j] == 0 && ximp[i, j] == 1
-                FP += 1
-            elseif xtrue[i, j] == 0 && ximp[i, j] == 2
-                FP += 2
-            elseif xtrue[i, j] == 1 && ximp[i, j] == 2
-                FP += 1
-            end
-
-            # false negatives
-            if xtrue[i, j] == 1 && ximp[i, j] == 0
-                FN += 1
-            elseif xtrue[i, j] == 2 && ximp[i, j] == 1
-                FN += 1
+            if xtrue[i, j] == 0 && ximp[i, j] == 0
+                D += 2
+            elseif xtrue[i, j] == 1 && ximp[i, j] == 0
+                D += 1
+                B += 1
             elseif xtrue[i, j] == 2 && ximp[i, j] == 0
-                FN += 2
-            end
-        end
-        push!(precisions, TP / (TP + FP))
-        push!(sensitivities, TP / (TP + FN))
-    end
-    return precisions, sensitivities
-end
-
-function compute_non_ref_concordance(ximp::AbstractMatrix, xtrue::AbstractMatrix)
-    size(ximp) == size(xtrue) || error("check dimension")
-    n, p = size(ximp)
-    concordance = zeros(p)
-    counters = zeros(Int, p)
-    for j in 1:p
-        tot_nonref_alleles = sum(skipmissing(@view(xtrue[:, j])))
-        TP = 0
-        for i in 1:n
-            ismissing(xtrue[i, j]) && continue
-            ismissing(ximp[i, j]) && continue
-
-            # true positives
-            if xtrue[i, j] == ximp[i, j] == 1
-                TP += 1
-            elseif xtrue[i, j] == 1 && ximp[i, j] == 2
-                TP += 1
+                B += 2
+            elseif xtrue[i, j] == 0 && ximp[i, j] == 1
+                D += 1
+                C += 1
+            elseif xtrue[i, j] == 1 && ximp[i, j] == 1
+                A += 1
+                D += 1
             elseif xtrue[i, j] == 2 && ximp[i, j] == 1
-                TP += 1
-            elseif xtrue[i, j] == ximp[i, j] == 2
-                TP += 2
+                A += 1
+                B += 1
+            elseif xtrue[i, j] == 0 && ximp[i, j] == 2
+                C += 2
+            elseif xtrue[i, j] == 1 && ximp[i, j] == 2
+                A += 1
+                C += 1
+            elseif xtrue[i, j] == 2 && ximp[i, j] == 2
+                A += 2
+            else
+                error(
+                    "Expected xtrue[i,j] and ximpt[i,j] to take values " * 
+                    "0, 1, or 2. Did you call convert_gt on both?"
+                )
             end
         end
-        concordance[j] = TP / tot_nonref_alleles
-        counters[j] = TP
+        push!(contigency_tables, ContingencyTable(A, B, C, D))
     end
-    return concordance, counters
+    return contigency_tables
 end
 
-function compute_non_ref_concordance(
+function compute_concordance(
     genotype_file::String, # VCF (will import GT field)
     imputed_file::String; # VCF (import DS field, unless use_dosage=false, in which case we import GT)
     summary_file::String = ""
@@ -539,31 +477,40 @@ function compute_non_ref_concordance(
         genotype_file, imputed_file, summary_file=summary_file, use_dosage=false,
     )
 
-    concordance, counters = compute_non_ref_concordance(Ximpt, Xgeno)
+    # compute 2 by 2 contingency tables, one for each SNP
+    contigency_tables = compute_concordance(Ximpt, Xgeno)
 
-    return concordance, counters, mafs
+    # compute sensitivities/precision/non-ref-concordance
+    sensitivities = sensitivity.(contigency_tables)
+    precisions = precision.(contigency_tables)
+    nonref_concordances = nonref_concordance.(contigency_tables)
+
+    return sensitivities, precisions, nonref_concordances, mafs, contigency_tables
 end
 
-function compute_non_ref_concordance(
+function compute_concordance(
     genotype_file::Vector{String}, # VCF (will import GT field)
     imputed_file::Vector{String}; # VCF (import DS field, unless use_dosage=false, in which case we import GT)
     summary_file::Vector{String} = ["" for _ in eachindex(genotype_file)]
     )
-    concordances, counters, mafs = Float64[], Int[], Float64[]
+    contigency_tables, mafs = ContingencyTable[], Float64[]
     for (gtfile, impfile, summ_file) in zip(genotype_file, imputed_file, summary_file)
         # import the full genotype and imputed data matrices
         Xgeno, Ximpt, mf, _, _ = import_Xtrue_Ximp(
             gtfile, impfile, summary_file=summ_file, use_dosage=false,
         )
 
-        # compute confordance for current file and save 
-        conc, cont = compute_non_ref_concordance(Ximpt, Xgeno)
-        append!(concordances, conc)
-        append!(counters, cont)
+        # compute confordance for current file
+        contigency_tables_subset = compute_concordance(Ximpt, Xgeno)
+        append!(contigency_tables, contigency_tables_subset)
         append!(mafs, mf)
-        length(concordances) == length(counters) == length(mafs) || 
-            error("length different!")
     end
+    length(contigency_tables) == length(mafs) || error("length different!")
 
-    return concordances, counters, mafs
+    # compute sensitivities/precision/non-ref-concordance
+    sensitivities = sensitivity.(contigency_tables)
+    precisions = precision.(contigency_tables)
+    nonref_concordances = nonref_concordance.(contigency_tables)
+
+    return sensitivities, precisions, nonref_concordances, mafs, contigency_tables
 end
