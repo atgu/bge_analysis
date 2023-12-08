@@ -35,7 +35,6 @@ Required arguments:
 
 Optional arguments include:
 + `--summary`: An optional which allows users to NOT consider certain SNPs that exist in ground truth or imputed genotype files. Must be either a full file path to a comma or tab separated summary file (header must include at least 5 columns with the names CHR/POS/REF/ALT/isImputed), or a file containing a list of summary files. The scripts are set up so that only SNPs listed as `true` in the `isImputed` column will be considered. 
-+ `--maf-bins`: Comma-separated list of minor allele frequencies used to bin SNPs. Defaults to `0.0,0.0005,0.001,0.004,0.0075,0.0125,0.04,0.1,0.2,0.5`
 
 ### Details of sensitivity, precision, and non-reference concordances
 

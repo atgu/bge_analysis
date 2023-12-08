@@ -31,7 +31,7 @@ function get_ancestry_names(mspfile::AbstractString)
 end
 
 """
-    import_Xtrue_Ximp(genotype_file, imputed_file, summary_file; [use_dosage])
+    import_Xtrue_Ximp(genotype_file, imputed_file; [summary_file], [use_dosage])
 
 Imports VCF files `genotype_file` and `imputed_file` into numeric matrices and
 subset them so their are on the same set of SNPs. If REF/ALT is opposite in 
@@ -240,11 +240,19 @@ function create_LAI_mapping_matrices(
     return per_snp_ancestry_background, sampleID, nsnps
 end
 
+
+# chr = 22
+# genotype_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_consistent/chr$chr.vcf.gz"
+# imputed_file = "/u/home/b/biona001/project-loes/paisa_tmp/genotype_dosages/chr$chr.vcf.gz"
+# msp_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_consistent/chr$chr.msp.tsv"
+# summary_file = ""
+# ancestry_names = get_ancestry_names(msp_file)
+# maf_bins = [0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
 function get_ancestry_specific_r2(
     genotype_file::String, # VCF (will import GT field)
     imputed_file::String, # VCF (import DS field, unless use_dosage=false, in which case we import GT)
-    mspfile::String, # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
-    ancestry_names::Vector{String};
+    msp_file::String; # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
+    ancestry_names::Vector{String} = get_ancestry_names(msp_file),
     summary_file::String = "", # must contain CHR/POS/REF/ALT/AF/isImputed columns
     use_dosage::Bool=true, # whether to import imputed data as dosage or genotypes
     maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
@@ -252,7 +260,7 @@ function get_ancestry_specific_r2(
     # compute background ancestries on the phased genotypes
     n_ancestries = length(ancestry_names)
     ancestry_masks, _, nsnps = create_LAI_mapping_matrices(
-        mspfile, n_ancestries, ancestry_names=ancestry_names)
+        msp_file, n_ancestries, ancestry_names=ancestry_names)
 
     # before continueing, check for a weird error I got on chr10 of PAISA data
     if nsnps != nrecords(genotype_file)

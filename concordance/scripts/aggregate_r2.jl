@@ -41,7 +41,7 @@ parsed_args = parse_args(s)
 input1 = parsed_args["truth"]
 input2 = parsed_args["impt"]
 outfile = parsed_args["out"]
-maf_bins = split(parsed_args["maf-bins"], ',')
+maf_bins = parse.(Float64, split(parsed_args["maf-bins"], ','))
 
 # check if input is a list of files
 input1_isvcf = endswith(input1, ".vcf") || endswith(input1, ".vcf.gz")

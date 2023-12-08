@@ -49,7 +49,7 @@ input1 = parsed_args["truth"]
 input2 = parsed_args["impt"]
 input3 = parsed_args["msp"]
 outfile = parsed_args["out"]
-maf_bins = split(parsed_args["maf-bins"], ',')
+maf_bins = parse.(Float64, split(parsed_args["maf-bins"], ','))
 
 # check if input is a list of files
 input1_isvcf = endswith(input1, ".vcf") || endswith(input1, ".vcf.gz")
@@ -78,8 +78,8 @@ end
 
 @info "Computing aggregate R2 by local ancestries"
 df, _ = get_ancestry_specific_r2(
-    genotype_file, imputed_file, msp_file, ancestry_names,
-    summary_file=summary_file, 
+    genotype_file, imputed_file, msp_file, ancestry_names=ancestry_names,
+    summary_file=summary_file, maf_bins=maf_bins
 )
 
 # save as dataframe

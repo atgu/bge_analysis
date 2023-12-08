@@ -13,8 +13,6 @@
 #            or a file containing a list of summary files. The scripts are set
 #            up so that only SNPs listed as `true` in the `isImputed` column will
 #            be considered. 
-# --maf-bins: Comma-separated list of minor allele frequencies used to bin SNPs.
-#             Defaults to 0.0,0.0005,0.001,0.004,0.0075,0.0125,0.04,0.1,0.2,0.5
 
 include("utilities.jl")
 
@@ -34,15 +32,11 @@ s = ArgParseSettings()
     "--summary"
         default = ""
         arg_type = String
-    "--maf-bins"
-        default = "0.0,0.0005,0.001,0.004,0.0075,0.0125,0.04,0.1,0.2,0.5"
-        arg_type = String
 end
 parsed_args = parse_args(s)
 input1 = parsed_args["truth"]
 input2 = parsed_args["impt"]
 outfile = parsed_args["out"]
-maf_bins = split(parsed_args["maf-bins"], ',')
 
 # check if input is a list of files
 input1_isvcf = endswith(input1, ".vcf") || endswith(input1, ".vcf.gz")
