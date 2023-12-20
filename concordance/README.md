@@ -31,7 +31,7 @@ julia concordance.jl --truth file1 --impt file2 --out file3
 Required arguments:
 + `--truth`: Full file path to the ground truth genotypes (must end in `.vcf` or `.vcf.gz`), or a file containing a list of VCF files
 + `--impt`: Full file path to the imputed genotypes (must end in `.vcf` or `.vcf.gz`), or a file containing a list of VCF files
-+ `--out`: Full file path to output file name. Output will be non-reference concordance (i.e the percent of non-reference alleles that were correctly imputed)
++ `--out`: Full file path to output file name. 
 
 Optional arguments include:
 + `--summary`: An optional which allows users to NOT consider certain SNPs that exist in ground truth or imputed genotype files. Must be either a full file path to a comma or tab separated summary file (header must include at least 5 columns with the names CHR/POS/REF/ALT/isImputed), or a file containing a list of summary files. The scripts are set up so that only SNPs listed as `true` in the `isImputed` column will be considered. 
@@ -72,7 +72,7 @@ julia aggregate_r2.jl --truth file1 --impt file2 --out file3
 Required arguments:
 + `--truth`: Full file path to the ground truth genotypes (must end in .vcf or .vcf.gz), or a file containing a list of VCF files
 + `--impt`: Full file path to the imputed genotypes (must end in .vcf or .vcf.gz), or a file containing a list of VCF files
-+ `--out`: Full file path to output file name. Output will be non-reference concordance (i.e the percent of non-reference alleles that were correctly imputed)
++ `--out`: Full file path to output file name. 
 
 Optional arguments include:
 + `--summary`: An optional which allows users to NOT consider certain SNPs that exist in ground truth or imputed genotype files. Must be either a full file path to a comma or tab separated summary file (header must include at least 5 columns with the names CHR/POS/REF/ALT/isImputed), or a file containing a list of summary files. The scripts are set up so that only SNPs listed as `true` in the `isImputed` column will be considered. 
@@ -92,7 +92,7 @@ Required arguments:
 + `--truth`: Full file path to the ground truth genotypes (must end in `.vcf` or `.vcf.gz`), or a file containing a list of VCF files
 + `--impt`: Full file path to the imputed genotypes (must end in `.vcf` or `.vcf.gz`), or a file containing a list of VCF files
 + `--msp`: Full file path to the `.msp.tsv` file (output of rfmix2), or a file containing a list of `.msp.tsv` files
-+ `--out`: Full file path to output file name. Output will be non-reference concordance (i.e the percent of non-reference alleles that were correctly imputed)
++ `--out`: Full file path to output file name. 
 
 Optional arguments include:
 + `--summary`: An optional which allows users to NOT consider certain SNPs that exist in ground truth or imputed genotype files. Must be either a full file path to a comma or tab separated summary file (header must include at least 5 columns with the names CHR/POS/REF/ALT/isImputed), or a file containing a list of summary files. The scripts are set up so that only SNPs listed as `true` in the `isImputed` column will be considered. 

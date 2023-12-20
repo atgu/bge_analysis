@@ -43,7 +43,7 @@ function ==(x::SNP, y::SNP)
     return true
 end
 function indexin(a::AbstractArray{SNP}, b::AbstractArray{SNP})
-    # same as Base.index but works on a vector of SNP.
+    # same as Base.indexin but works on a vector of SNP.
     # Note to self: it is important to include both SNP(chr, pos, ref, alt) and SNP(chr, pos, alt, ref)
     # when checking if a SNP exist in the other vector
     inds = keys(b)

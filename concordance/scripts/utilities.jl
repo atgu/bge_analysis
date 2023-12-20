@@ -58,7 +58,7 @@ function import_Xtrue_Ximp(
         import_func(Float64, imputed_file, save_snp_info=true, 
         msg="Importing imputed VCF")
     imputed_snps = SNPs(imputed_chr, imputed_pos, imputed_ref, imputed_alt)
-    
+
     # compute maf (between 0 and 0.5) from imputed data
     AF = get_AF(imputed_data)
     MAF = copy(AF)
@@ -96,10 +96,8 @@ function import_Xtrue_Ximp(
 
     # flip 2 to 0 and 0 to 2 if ref/alt allele is opposite
     imputed_snps = imputed_snps[imputed_col_idx]
-    imputed_ref = imputed_ref[imputed_col_idx]
-    imputed_alt = imputed_alt[imputed_col_idx]
-    MAF = MAF[imputed_col_idx]
     array_snps = array_snps[array_col_idx]
+    MAF = MAF[imputed_col_idx]
     for (i, (imputed_snp, genotyped_snp)) in enumerate(zip(imputed_snps, array_snps))
         if (imputed_snp.ref == genotyped_snp.ref) && (imputed_snp.alt == genotyped_snp.alt)
             continue
@@ -115,6 +113,13 @@ function import_Xtrue_Ximp(
     size(Xgeno, 2) == length(shared_snps) || error("expected size(Xgeno, 2) == length(shared_snps)")
 
     return Xgeno, Ximpt, MAF, shared_samples, shared_snps
+end
+
+function aggregate_R2(Xgeno::AbstractMatrix, Ximpt::AbstractMatrix)
+    truth = vec(Xgeno)
+    imptd = vec(Ximpt)
+    idx = intersect(findall(!ismissing, truth), findall(!ismissing, imptd))
+    return cor(truth[idx], imptd[idx])^2
 end
 
 function get_aggregate_R2(
@@ -143,10 +148,7 @@ function get_aggregate_R2(
         end
 
         # compute squared pearson correlation
-        truth = vec(Xgeno[:, idx])
-        imptd = vec(Ximpt[:, idx])
-        non_missing_idx = intersect(findall(!ismissing, truth), findall(!ismissing, imptd))
-        my_R2 = cor(truth[non_missing_idx], imptd[non_missing_idx])^2
+        my_R2 = aggregate_R2(Xgeno[:, idx], Ximpt[:, idx])
         push!(R2, my_R2)
         push!(nsnps, length(idx))
     end
@@ -344,15 +346,16 @@ end
 function get_ancestry_specific_r2(
     genotype_file::Vector{String}, # VCF files (will import GT field), e.g. one for each chr
     imputed_file::Vector{String}, # VCF files (import DS field, unless use_dosage=false, in which case we import GT)
-    msp_file::Vector{String}, # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
-    ancestry_names::Vector{String};
+    msp_file::Vector{String}; # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
+    ancestry_names::Vector{String} = get_ancestry_names(msp_file),
     summary_file::Vector{String} = ["" for _ in eachindex(genotype_file)], 
     use_dosage::Bool=true,
     maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
     )
     # get ancestry specific R2 for first set of files
     df, nsnps = get_ancestry_specific_r2(
-        genotype_file[1], imputed_file[1], msp_file[1], ancestry_names, 
+        genotype_file[1], imputed_file[1], msp_file[1], 
+        ancestry_names = ancestry_names, 
         summary_file = summary_file[1], use_dosage=use_dosage, 
         maf_bins=maf_bins
     )
@@ -370,7 +373,8 @@ function get_ancestry_specific_r2(
     # loop over remaining file
     for i in 2:length(genotype_file)
         df, nsnps = get_ancestry_specific_r2(
-            genotype_file[i], imputed_file[i], msp_file[i], ancestry_names, 
+            genotype_file[i], imputed_file[i], msp_file[i], 
+            ancestry_names = ancestry_names, 
             summary_file = summary_file[i], use_dosage=use_dosage, 
             maf_bins=maf_bins, 
         )
