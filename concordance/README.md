@@ -2,8 +2,9 @@
 
 We used a few metrics for evaluating GLIMPSE's imputation accuracy:
 1. Concordance (including sensitivity, precision, and non-reference concordance)
-2. Aggregate R2 (squared Pearson's correlation)
-3. Aggregate R2 but stratefying SNPs by their local ancestry backgrounds. 
+2. Non-reference concordance stratifying SNPs by their local ancestry backgrounds
+3. Aggregate R2 (squared Pearson's correlation)
+4. Aggregate R2 but stratifying SNPs by their local ancestry backgrounds
 
 See `examples.ipynb` for how to run these scripts and expected outputs. 
 
@@ -11,7 +12,7 @@ See `examples.ipynb` for how to run these scripts and expected outputs.
 
 To run the scripts, 
 
-1. Download and install [Julia](https://julialang.org/downloads/) (any version above 1.6.7 should work)
+1. Download and install [Julia](https://julialang.org/downloads/) (any version above 1.6.7 should work.)
 2. Within Julia, install required packages by 
 ```julia
 using Pkg
