@@ -181,7 +181,6 @@ function get_aggregate_R2(
     return agg_R2, tot_snps
 end
 
-
 """
     create_LAI_mapping_matrices(mspfile::String, n_ancestries::Int)
 
@@ -242,14 +241,6 @@ function create_LAI_mapping_matrices(
     return per_snp_ancestry_background, sampleID, nsnps
 end
 
-
-# chr = 22
-# genotype_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_consistent/chr$chr.vcf.gz"
-# imputed_file = "/u/home/b/biona001/project-loes/paisa_tmp/genotype_dosages/chr$chr.vcf.gz"
-# msp_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_consistent/chr$chr.msp.tsv"
-# summary_file = ""
-# ancestry_names = get_ancestry_names(msp_file)
-# maf_bins = [0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
 function get_ancestry_specific_r2(
     genotype_file::String, # VCF (will import GT field)
     imputed_file::String, # VCF (import DS field, unless use_dosage=false, in which case we import GT)
@@ -322,12 +313,11 @@ function get_ancestry_specific_r2(
                 continue
             end
 
-            # compute squared pearson correlation
+            # compute accuracy
             mask = has_this_ancestry[:, idx]
-            truth = vec(Xgeno[:, idx][mask])
-            imptd = vec(Ximpt[:, idx][mask])
-            non_missing_idx = intersect(findall(!ismissing, truth), findall(!ismissing, imptd))
-            push!(R2, cor(truth[non_missing_idx], imptd[non_missing_idx])^2)
+            truth = @view(Xgeno[:, idx][mask])
+            imptd = @view(Ximpt[:, idx][mask])
+            push!(R2, aggregate_R2(truth, imptd))
             nsnps[i-1, counter] = length(idx) # record number of SNPs used to compute R2
         end
         df[!, ancestry] = R2
@@ -338,6 +328,92 @@ function get_ancestry_specific_r2(
     # the second return argument is the number of SNPs in each bin used to 
     # calculate the given R2
     return df, nsnps
+end
+
+# computes non-reference concordance by local ancestry background
+# chr = 22
+# genotype_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed/chr$chr.vcf.gz"
+# imputed_file = "/u/home/b/biona001/project-loes/paisa_tmp/genotype_dosages/chr$chr.vcf.gz"
+# msp_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_chibchan_imputed/chr$chr.msp.tsv"
+# summary_file = ""
+# ancestry_names = get_ancestry_names(msp_file)
+# maf_bins = [0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
+# result = get_ancestry_specific_concordance(genotype_file, imputed_file, msp_file)
+function get_ancestry_specific_concordance(
+    genotype_file::String, # VCF (will import GT field)
+    imputed_file::String, # VCF (import DS field, unless use_dosage=false, in which case we import GT)
+    msp_file::String; # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
+    ancestry_names::Vector{String} = get_ancestry_names(msp_file),
+    summary_file::String = "", # must contain CHR/POS/REF/ALT/AF/isImputed columns
+    )
+    # compute background ancestries on the phased genotypes
+    n_ancestries = length(ancestry_names)
+    ancestry_masks, _, nsnps = create_LAI_mapping_matrices(
+        msp_file, n_ancestries, ancestry_names=ancestry_names)
+
+    # before continueing, check for a weird error I got on chr10 of PAISA data
+    if nsnps != nrecords(genotype_file)
+        error(
+            "The `n snps` column in msp file does not sum to the number " * 
+            "of SNPs in $genotype_file. I got this weird error before, so " * 
+            "this might be Rfmix2 filtering out SNPs based on unknown criteria"
+        )
+    end
+
+    # import the genotype and imputed data matrices, after matching them
+    Xgeno, Ximpt, mafs, samples, snps = import_Xtrue_Ximp(
+        genotype_file, imputed_file, summary_file=summary_file, 
+        use_dosage=false, 
+    )
+
+    # Note: background ancestries were computed on the phased genotypes, 
+    # which gives a 0/1 bit indicating whether the given sample/SNP has a 
+    # specific background ancestry. However, the masking matrices in 
+    # `ancestry_masks` does not come with sample/SNP labeling, so we must 
+    # import that information separately
+    _, array_sampleIDs, array_chr, array_pos, _, array_ref, array_alt = 
+        convert_gt(Float64, genotype_file, save_snp_info=true, 
+        msg="Importing VCF data")
+    array_snps = SNPs(array_chr, array_pos, array_ref, array_alt)
+
+    # figure out which sample/SNPs can be used and subset the masks
+    row_idx = indexin(samples, array_sampleIDs)
+    col_idx = indexin(snps, array_snps)
+    for (ancestry, has_this_ancestry) in ancestry_masks
+        ancestry_masks[ancestry] = has_this_ancestry[row_idx, col_idx]
+    end
+
+    # loop through each background ancestry
+    result = Dict{String, DataFrame}()
+    for (ancestry, has_this_ancestry) in ancestry_masks
+        contigency_tables = ContingencyTable[]
+        ngenotypes = Int[] # tracks how many samples have `ancestry` background for each SNP
+        for j in 1:size(Xgeno, 2)
+            mask = @view(has_this_ancestry[:, j])
+            truth = @view(Xgeno[mask, j])
+            imptd = @view(Ximpt[mask, j])
+            snp_j_contigency = compute_concordance(truth, imptd)
+            push!(contigency_tables, snp_j_contigency)
+            push!(ngenotypes, sum(mask))
+        end
+
+        # compute sensitivities/precision/non-ref-concordance for this ancestry
+        sensitivities = sensitivity.(contigency_tables)
+        precisions = precision.(contigency_tables)
+        nonref_concordances = nonref_concordance.(contigency_tables)
+
+        # save result in dataframe
+        df = DataFrame("MAF"=>mafs, "sensitivities"=>sensitivities, 
+            "precisions"=>precisions, "nonref_concordances"=>nonref_concordances,
+            "ngenotypes"=>ngenotypes)
+        result[ancestry] = df
+    end
+
+    # returns a list of dataframes, one for each ancestry background,
+    # containing maf/sensitivity/precision/nonref_concordances, as well as 
+    # `ngenotypes` which tracks how many samples the given `ancestry` background
+    # for each SNP
+    return result
 end
 
 # computes aggregate R2, averaging over all files (but taking into account the 
@@ -438,44 +514,50 @@ function compute_concordance(ximp::AbstractMatrix, xtrue::AbstractMatrix)
     n, p = size(ximp)
     contigency_tables = ContingencyTable[]
     for j in 1:p
-        A, B, C, D = 0, 0, 0, 0
-        for i in 1:n
-            ismissing(xtrue[i, j]) && continue
-            ismissing(ximp[i, j]) && continue
-
-            if xtrue[i, j] == 0 && ximp[i, j] == 0
-                D += 2
-            elseif xtrue[i, j] == 1 && ximp[i, j] == 0
-                D += 1
-                B += 1
-            elseif xtrue[i, j] == 2 && ximp[i, j] == 0
-                B += 2
-            elseif xtrue[i, j] == 0 && ximp[i, j] == 1
-                D += 1
-                C += 1
-            elseif xtrue[i, j] == 1 && ximp[i, j] == 1
-                A += 1
-                D += 1
-            elseif xtrue[i, j] == 2 && ximp[i, j] == 1
-                A += 1
-                B += 1
-            elseif xtrue[i, j] == 0 && ximp[i, j] == 2
-                C += 2
-            elseif xtrue[i, j] == 1 && ximp[i, j] == 2
-                A += 1
-                C += 1
-            elseif xtrue[i, j] == 2 && ximp[i, j] == 2
-                A += 2
-            else
-                error(
-                    "Expected xtrue[i,j] and ximpt[i,j] to take values " * 
-                    "0, 1, or 2. Did you call convert_gt on both?"
-                )
-            end
-        end
-        push!(contigency_tables, ContingencyTable(A, B, C, D))
+        snp_j_contigency = compute_concordance(@view(ximp[:, j]), @view(xtrue[:, j]))
+        push!(contigency_tables, snp_j_contigency)
     end
     return contigency_tables
+end
+
+function compute_concordance(ximp::AbstractVector, xtrue::AbstractVector)
+    n = length(ximp)
+    n == length(xtrue) || error("Expected ximp and xtrue to have the same length")
+    A, B, C, D = 0, 0, 0, 0
+    for i in 1:n
+        ismissing(xtrue[i]) && continue
+        ismissing(ximp[i]) && continue
+        if xtrue[i] == 0 && ximp[i] == 0
+            D += 2
+        elseif xtrue[i] == 1 && ximp[i] == 0
+            D += 1
+            B += 1
+        elseif xtrue[i] == 2 && ximp[i] == 0
+            B += 2
+        elseif xtrue[i] == 0 && ximp[i] == 1
+            D += 1
+            C += 1
+        elseif xtrue[i] == 1 && ximp[i] == 1
+            A += 1
+            D += 1
+        elseif xtrue[i] == 2 && ximp[i] == 1
+            A += 1
+            B += 1
+        elseif xtrue[i] == 0 && ximp[i] == 2
+            C += 2
+        elseif xtrue[i] == 1 && ximp[i] == 2
+            A += 1
+            C += 1
+        elseif xtrue[i] == 2 && ximp[i] == 2
+            A += 2
+        else
+            error(
+                "Expected xtrue[i,j] and ximpt[i,j] to take values " * 
+                "0, 1, or 2. Did you call convert_gt on both?"
+            )
+        end
+    end
+    return ContingencyTable(A, B, C, D)
 end
 
 function compute_concordance(
