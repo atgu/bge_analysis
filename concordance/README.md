@@ -45,7 +45,7 @@ For each SNP, we can create the following contingency table:
 |-------|---------|--------------------|--------------------|
 |       |         | ALT (1)            | REF (0)            |
 | truth | ALT (1) | true positive (A)  | false negative (B) |
-| truth | REF (0) | false positive (C) | false negative (D) |
+| truth | REF (0) | false positive (C) | true negative (D) |
 
 Let 1 = ALT and 0 = REF, then we have the following cases
 
@@ -61,7 +61,7 @@ Let 1 = ALT and 0 = REF, then we have the following cases
 
 Then
 
-+ `Sensitivity` = true positives / (true positives + false negaitves) = A / (A+B). (NOTE that the total number of ALT alleles in the array data is A+B)
++ `Sensitivity` = true positives / (true positives + false negatives) = A / (A+B). (NOTE that the total number of ALT alleles in the array data is A+B)
 + `Precision` = true positives / (true positives + false positives) = A / (A+C)
 + `Non-reference concordance` = A / (A+B+C). To see why, consider the denominator to be the total number of ALT alleles called the *either* array/truth dataset or imputed dataset, i.e. (A+B+C). The numerator is where they agree, i.e. A.
 

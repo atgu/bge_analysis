@@ -480,7 +480,7 @@ we create the following contingency table:
                     |------------------------------------------|
             ALT (1) | true positive  (A) | false negative (B)  |
 Truth:              |------------------------------------------|
-            REF (0) | false positive (C) | false negative (D)  |
+            REF (0) | false positive (C) | true negative (D)  |
                     |------------------------------------------|
 
 Let 1 = ALT and 0 = REF, then we have the following cases
