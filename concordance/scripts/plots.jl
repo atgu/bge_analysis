@@ -9,13 +9,20 @@ function make_aggregate_R2_plot(
     plt_title::String;
     ymin = 0.0, 
     ymax=1.0,
+    markersize = ones(length(maf_bins) - 1),
+    my_color = "mediumblue", # default color
+    my_series_style = :solid, # default series style
     ) where T
     maf_bin_xaxis = [(maf_bins[i] + maf_bins[i-1])/2 for i in 2:length(maf_bins)]
     plt = plot(maf_bin_xaxis, aggregate_R2, markershape=:circle, 
         ylabel="Aggregate R2", label=plt_label,
-        xlabel="MAF (%)", xaxis=:log, ylim=(ymin, ymax), xlim=(0.00003, 0.6),
-        xticks=([0.0001, 0.001, 0.01, 0.1, 0.5], ["0.01", "0.1", "1", "10", "50"]),
-        legend=:bottomright, title=plt_title)
+        xlabel="MAF", ylim=(ymin, ymax), 
+        # xaxis=:log, xlim=(0.00003, 0.6),
+        # xticks=([0.0001, 0.001, 0.01, 0.1, 0.5], ["0.01", "0.1", "1", "10", "50"]),
+        legend=:bottomright, title=plt_title,
+        size=(400, 400), dpi=300, markerstrokewidth=0, w=3, 
+        markersize=markersize, my_color=my_color, my_series_style=my_series_style
+        )
     return plt
 end
 
@@ -26,18 +33,25 @@ function make_aggregate_R2_plots(
     plt_title::String;
     ymin = 0.0, 
     ymax=1.0,
+    markersize = ones(length(maf_bins) - 1),
+    my_color = "mediumblue", # default color
+    my_series_style = :solid, # default series style
     ) where T
     maf_bin_xaxis = [(maf_bins[i] + maf_bins[i-1])/2 for i in 2:length(maf_bins)]   
 
     # make init plot
     plt = make_aggregate_R2_plot(
         aggregate_R2s[1], plt_labels[1], maf_bins, plt_title,
-        ymin=ymin, ymax=ymax,
+        ymin=ymin, ymax=ymax, markersize=markersize[1],
+        my_color=my_color[1], my_series_style=my_series_style[1]
     )
 
     # remaining plots
     for i in 2:length(aggregate_R2s)
-        plot!(plt, maf_bin_xaxis, aggregate_R2s[i], label=plt_labels[i], markershape=:circle)
+        plot!(plt, maf_bin_xaxis, aggregate_R2s[i], label=plt_labels[i], 
+            markershape=:circle, size=(400, 400), dpi=300, 
+            markerstrokewidth=0, w=3, color=my_colors[i], ls=my_series_style[i]
+            )
     end
 
     return plt
@@ -71,8 +85,9 @@ function make_concordance_plots(
 
     plt = plot(maf_bin_xaxis, concordance_by_maf_bins, markershape=:circle, 
         ylabel="Non-ref conconcordance", label=plt_label,
-        xlabel="MAF (%)", xaxis=:log, ylim=(ymin, ymax), xlim=(0.0003, 0.6),
-        xticks=([0.001, 0.01, 0.1, 0.5], ["0.1", "1", "10", "50"]),
+        xlabel="MAF", ylim=(ymin, ymax), 
+#         xaxis=:log, xlim=(0.0003, 0.6),
+#         xticks=([0.001, 0.01, 0.1, 0.5], ["0.1", "1", "10", "50"]),
         legend=:bottomright, title=plt_title, markersize=markersize, 
         size=(400, 400), dpi=300, markerstrokewidth=0, w=3, 
         color=my_color, ls=my_series_style)

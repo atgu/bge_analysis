@@ -77,7 +77,7 @@ else
 end
 
 @info "Computing aggregate R2 by local ancestries"
-df, _ = get_ancestry_specific_r2(
+df, tot_snps = get_ancestry_specific_r2(
     genotype_file, imputed_file, msp_file, ancestry_names=ancestry_names,
     summary_file=summary_file, maf_bins=maf_bins
 )
@@ -86,4 +86,5 @@ df, _ = get_ancestry_specific_r2(
 outdir = dirname(outfile)
 isdir(outdir) || mkpath(outdir)
 CSV.write(outfile, df, delim='\t')
+writedlm(outfile * ".tot_snps", tot_snps)
 println("Done! Ancestry-specific aggregate R2 saved to $outfile")

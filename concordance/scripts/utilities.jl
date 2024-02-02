@@ -38,7 +38,7 @@ subset them so their are on the same set of SNPs. If REF/ALT is opposite in
 `genotype_file` and `imputed_file`, we will flip corresponding entries in 
 `genotype_file` so that the dosages from `genotype_file` and genotypes of 
 `imputed_file` can be correlated directly. Minor allele frequency is computed
-based on `imputed_file`
+based on `genotype_file`
 """
 function import_Xtrue_Ximp(
     genotype_file::String, # VCF (will import GT field)
@@ -60,7 +60,7 @@ function import_Xtrue_Ximp(
     imputed_snps = SNPs(imputed_chr, imputed_pos, imputed_ref, imputed_alt)
 
     # compute maf (between 0 and 0.5) from imputed data
-    AF = get_AF(imputed_data)
+    AF = get_AF(array_data)
     MAF = copy(AF)
     idx = findall(x -> x > 0.5, MAF)
     MAF[idx] .-= 1 .- MAF[idx]
@@ -115,7 +115,7 @@ function import_Xtrue_Ximp(
     return Xgeno, Ximpt, MAF, shared_samples, shared_snps
 end
 
-function aggregate_R2(Xgeno::AbstractMatrix, Ximpt::AbstractMatrix)
+function aggregate_R2(Xgeno::AbstractVecOrMat, Ximpt::AbstractVecOrMat)
     truth = vec(Xgeno)
     imptd = vec(Ximpt)
     idx = intersect(findall(!ismissing, truth), findall(!ismissing, imptd))
