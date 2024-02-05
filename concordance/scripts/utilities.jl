@@ -330,6 +330,143 @@ function get_ancestry_specific_r2(
     return df, nsnps
 end
 
+# include("/u/home/b/biona001/bge_analysis/concordance/scripts/utilities.jl")
+# include("/u/home/b/biona001/bge_analysis/concordance/scripts/plots.jl")
+# genotype_file = ["/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed_king/chr21.vcf.gz", "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed_king/chr22.vcf.gz"]
+# imputed_file = ["/u/home/b/biona001/project-loes/GLIMPSE2_toni/typedSNPs/chr21.sampleQC.snpQC.vcf.gz", "/u/home/b/biona001/project-loes/GLIMPSE2_toni/typedSNPs/chr22.sampleQC.snpQC.vcf.gz"]
+# msp_file = ["/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_v2/chr21.msp.tsv", "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_v2/chr22.msp.tsv"]
+# summary_file = ["", ""]
+# ancestry_names = get_ancestry_names(msp_file[1])
+# use_dosage = true
+# maf_bins = collect(LinRange(0, 0.5, 100))
+function get_ancestry_specific_r2(
+    genotype_file::Vector{String}, # VCF files (will import GT field), e.g. one for each chr
+    imputed_file::Vector{String}, # VCF files (import DS field, unless use_dosage=false, in which case we import GT)
+    msp_file::Vector{String}; # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
+    ancestry_names::Vector{String} = get_ancestry_names(msp_file[1]),
+    summary_file::Vector{String} = ["" for _ in eachindex(genotype_file)], 
+    use_dosage::Bool=true,
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
+    )
+    n_ancestries = length(ancestry_names)
+    n_files = length(genotype_file)
+    n_files == length(imputed_file) == length(msp_file) == 
+        length(summary_file) || error("Input files should have same length")
+
+    #
+    # import everything (note: memory intensive if many chromosomes)
+    # 
+    ancestry_masks = []
+    nsnps = Int[]
+    Xgenos = Matrix{Union{Missing, Float64}}[]
+    Ximpts = Matrix{Union{Missing, Float64}}[]
+    MAFs = Vector{Float64}[]
+    shared_samples = Vector{String}[]
+    shared_snps = Vector{SNP}[]
+    for i in 1:n_files
+        # compute background ancestries on the phased genotypes
+        ancestry_mask, _, nsnp = create_LAI_mapping_matrices(
+            msp_file[i], n_ancestries, ancestry_names=ancestry_names)
+
+        # before continueing, check for a weird error I got on chr10 of PAISA data
+        if nsnp != nrecords(genotype_file[i])
+            error(
+                "The `n snps` column in msp file does not sum to the number " * 
+                "of SNPs in $(genotype_file[i]). I got this weird error before, so " * 
+                "this might be Rfmix2 filtering out SNPs based on unknown criteria"
+            )
+        end
+
+        # import the genotype and imputed data matrices, after matching them
+        Xgeno, Ximpt, MAF, shared_sample, shared_snp = import_Xtrue_Ximp(
+            genotype_file[i], imputed_file[i], summary_file=summary_file[i], 
+            use_dosage=use_dosage, 
+        )
+
+        # Note: background ancestries were computed on the phased genotypes, 
+        # which gives a 0/1 bit indicating whether the given sample/SNP has a 
+        # specific background ancestry. However, the masking matrices in 
+        # `ancestry_masks` does not come with sample/SNP labeling, so we must 
+        # import that information separately
+        _, array_sampleIDs, array_chr, array_pos, _, array_ref, array_alt = 
+            convert_gt(Float64, genotype_file[i], save_snp_info=true, 
+            msg="Importing VCF data")
+        array_snps = SNPs(array_chr, array_pos, array_ref, array_alt)
+
+        # figure out which sample/SNPs can be used and subset the masks
+        row_idx = indexin(shared_sample, array_sampleIDs)
+        col_idx = indexin(shared_snp, array_snps)
+        for (ancestry, has_this_ancestry) in ancestry_mask
+            ancestry_mask[ancestry] = has_this_ancestry[row_idx, col_idx]
+        end
+
+        push!(ancestry_masks, ancestry_mask)
+        push!(nsnps, nsnp)
+        push!(Xgenos, Xgeno)
+        push!(Ximpts, Ximpt)
+        push!(MAFs, MAF)
+        push!(shared_samples, shared_sample)
+        push!(shared_snps, shared_snp)
+    end
+
+    # prepare dataframe
+    df = DataFrame(maf_bins = String[])
+    for i in 1:length(maf_bins)-1
+        if i == length(maf_bins)
+            push!(df[!, "maf_bins"], "[$(maf_bins[i]), $(maf_bins[i+1])]")
+        else
+            push!(df[!, "maf_bins"], "[$(maf_bins[i]), $(maf_bins[i+1]))")
+        end
+    end
+    for ancestry in keys(ancestry_masks[1])
+        df[!, ancestry] = zeros(size(df, 1)) # allocate R2 vector
+    end
+
+    #
+    # aggregate LAI segments for each MAF bin
+    #
+    # pseudo code:
+    # for EACH_MAF_BIN
+    #     truth, imptd = Float64[], Float64[]
+    #     for EACH_CHR 
+    #         for EACH_ANCESTRY
+    #             append_to_truth
+    #             append_to_imptd
+    #         end
+    #     end
+    #     R2 = aggregate_R2(truth, imptd)
+    #     append_R2_to_df
+    # end
+    nsnps = zeros(length(maf_bins) - 1, length(ancestry_masks[1]))
+    for i in 2:length(maf_bins)
+        bin_low, bin_high = maf_bins[i-1], maf_bins[i]
+        truth = [Union{Missing, Float64}[] for _ in 1:length(keys(ancestry_masks[1]))]
+        imptd = [Union{Missing, Float64}[] for _ in 1:length(keys(ancestry_masks[1]))]
+        for j in 1:n_files
+            # current Xtrue and Ximputed
+            Xgeno, Ximpt, MAF, ancestry_mask = Xgenos[j], Ximpts[j], MAFs[j], ancestry_masks[j]
+            idx = findall(x -> bin_low ≤ x < bin_high, MAF)
+            length(idx) == 0 && continue
+
+            # loop through different LAI
+            for (k, has_this_ancestry) in enumerate(values(ancestry_mask))
+                mask = has_this_ancestry[:, idx]
+                append!(truth[k], @view(Xgeno[:, idx][mask]))
+                append!(imptd[k], @view(Ximpt[:, idx][mask]))
+            end
+        end
+        for (k, ancestry) in enumerate(keys(ancestry_masks[1]))
+            df[i-1, ancestry] = aggregate_R2(truth[k], imptd[k])
+            nsnps[i-1, k] += length(truth[k])
+        end
+    end
+
+    # returns a dataframe containing aggregate R2 for different ancestries
+    # the second return argument is the number of SNPs in each bin used to 
+    # calculate the given R2
+    return df, nsnps
+end
+
 # computes non-reference concordance by local ancestry background
 # chr = 22
 # genotype_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed/chr$chr.vcf.gz"
@@ -414,59 +551,6 @@ function get_ancestry_specific_concordance(
     # `ngenotypes` which tracks how many samples the given `ancestry` background
     # for each SNP
     return result
-end
-
-# computes aggregate R2, averaging over all files (but taking into account the 
-# number of SNPs in each MAF bin). Thus, this is not a "true aggregate R2" over
-# all files. 
-function get_ancestry_specific_r2(
-    genotype_file::Vector{String}, # VCF files (will import GT field), e.g. one for each chr
-    imputed_file::Vector{String}, # VCF files (import DS field, unless use_dosage=false, in which case we import GT)
-    msp_file::Vector{String}; # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
-    ancestry_names::Vector{String} = get_ancestry_names(msp_file),
-    summary_file::Vector{String} = ["" for _ in eachindex(genotype_file)], 
-    use_dosage::Bool=true,
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
-    )
-    # get ancestry specific R2 for first set of files
-    df, nsnps = get_ancestry_specific_r2(
-        genotype_file[1], imputed_file[1], msp_file[1], 
-        ancestry_names = ancestry_names, 
-        summary_file = summary_file[1], use_dosage=use_dosage, 
-        maf_bins=maf_bins
-    )
-    R2s = df[:, 2:end] |> Matrix{Float64}
-
-    # if a certain ancestry/maf-bin have 0 SNPs, R2 will be NaN. Set those to 0
-    idx = findall(isnan, R2s)
-    R2s[idx] .= 0
-    nsnps[idx] .= 0
-
-    # variable to return: average R2 over all files, accounting bin sizes
-    tot_snps = copy(nsnps)
-    avg_R2 = copy(R2s) .* tot_snps
-
-    # loop over remaining file
-    for i in 2:length(genotype_file)
-        df, nsnps = get_ancestry_specific_r2(
-            genotype_file[i], imputed_file[i], msp_file[i], 
-            ancestry_names = ancestry_names, 
-            summary_file = summary_file[i], use_dosage=use_dosage, 
-            maf_bins=maf_bins, 
-        )
-        R2s = df[!, 2:end] |> Matrix{Float64}
-        idx = findall(!isnan, R2s)
-
-        avg_R2[idx] .+= R2s[idx] .* nsnps[idx]
-        tot_snps[idx] .+= nsnps[idx]
-    end
-
-    # final dataframe
-    avg_R2 ./= tot_snps
-    df = copy(df)
-    df[:, 2:end] .= avg_R2
-
-    return df, tot_snps
 end
 
 """
