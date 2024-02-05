@@ -63,7 +63,7 @@ function import_Xtrue_Ximp(
     AF = get_AF(array_data)
     MAF = copy(AF)
     idx = findall(x -> x > 0.5, MAF)
-    MAF[idx] .-= 1 .- MAF[idx]
+    MAF[idx] .= 1 .- MAF[idx]
 
     # shared samples
     shared_samples = intersect(imputed_sampleID, array_sampleID)
@@ -97,7 +97,7 @@ function import_Xtrue_Ximp(
     # flip 2 to 0 and 0 to 2 if ref/alt allele is opposite
     imputed_snps = imputed_snps[imputed_col_idx]
     array_snps = array_snps[array_col_idx]
-    MAF = MAF[imputed_col_idx]
+    MAF = MAF[array_col_idx]
     for (i, (imputed_snp, genotyped_snp)) in enumerate(zip(imputed_snps, array_snps))
         if (imputed_snp.ref == genotyped_snp.ref) && (imputed_snp.alt == genotyped_snp.alt)
             continue

@@ -21,7 +21,7 @@ function make_aggregate_R2_plot(
         # xticks=([0.0001, 0.001, 0.01, 0.1, 0.5], ["0.01", "0.1", "1", "10", "50"]),
         legend=:bottomright, title=plt_title,
         size=(400, 400), dpi=300, markerstrokewidth=0, w=3, 
-        markersize=markersize, my_color=my_color, my_series_style=my_series_style
+        markersize=markersize, color=my_color, ls=my_series_style
         )
     return plt
 end
@@ -33,7 +33,7 @@ function make_aggregate_R2_plots(
     plt_title::String;
     ymin = 0.0, 
     ymax=1.0,
-    markersize = ones(length(maf_bins) - 1),
+    markersize = [ones(length(maf_bins) - 1) for _ in 1:length(aggregate_R2s)],
     my_color = "mediumblue", # default color
     my_series_style = :solid, # default series style
     ) where T
@@ -50,6 +50,7 @@ function make_aggregate_R2_plots(
     for i in 2:length(aggregate_R2s)
         plot!(plt, maf_bin_xaxis, aggregate_R2s[i], label=plt_labels[i], 
             markershape=:circle, size=(400, 400), dpi=300, 
+            markersize=markersize[i],
             markerstrokewidth=0, w=3, color=my_colors[i], ls=my_series_style[i]
             )
     end
