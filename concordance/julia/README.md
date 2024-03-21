@@ -1,5 +1,7 @@
 # Evaluating imputation accuracy
 
+:warning: **Except for the local ancestry evaluation codes, code in this folder should be treated as back up scripts for cases when the main concordance scripts (in python) fail.**
+
 We used a few metrics for evaluating GLIMPSE's imputation accuracy:
 1. Concordance (including sensitivity, precision, and non-reference concordance)
 2. Non-reference concordance stratifying SNPs by their local ancestry backgrounds

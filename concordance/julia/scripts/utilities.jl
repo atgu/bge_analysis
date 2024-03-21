@@ -206,27 +206,38 @@ function create_LAI_mapping_matrices(
     # ancestry_names = get_ancestry_names(mspfile)
     # use_dosage = true
     # maf_bins = collect(LinRange(0, 0.5, 100))
-    # n_ancestries = 3
+    # n_ancestries = length(ancestry_names)
     # Xgeno, Ximpt, mafs, genotyped_samples, genotyped_snps = import_Xtrue_Ximp(
     #     genotype_file, imputed_file, summary_file=summary_file, 
     #     use_dosage=use_dosage, 
     # )
-    # per_snp_ancestry_background = create_LAI_mapping_matrices(
+    # @time per_snp_ancestry_background = create_LAI_mapping_matrices(
     #     genotyped_samples, genotyped_snps, mspfile, n_ancestries, 
     #     ancestry_names=ancestry_names
-    #     )
+    #     ) # 189 seconds (new code = 7.58 seconds)
+    # @test findall(per_snp_ancestry_background["EUR_EUR"][1:20]) == [1, 2, 3, 4, 6, 7, 10, 15, 17, 19]
+    # @test findall(per_snp_ancestry_background["EUR_EUR"][2341:2380]) == [1, 3, 7, 8, 9, 12, 13, 14, 20, 23, 25, 26, 28, 30, 31, 33, 34, 40]
+    # @test findall(per_snp_ancestry_background["EUR_EUR"][end-20:end]) == [1, 2, 3, 6, 9, 10, 11, 14, 16, 18, 21]
+    # @test findall(per_snp_ancestry_background["AFR_EUR"][1:300]) == [8, 9, 12, 14, 18, 33, 59, 79, 91, 117, 118, 125, 156, 162, 200, 242, 252, 255, 276, 281, 288, 289]
 
     length(ancestry_names) == n_ancestries || 
         error("expected length(ancestry_names) == n_ancestries")
     msp = CSV.read(mspfile, DataFrame, header=2)
     mat = msp[:, 7:end]
     spos = msp[!, "spos"] # start pos of each LAI segment
+    epos = msp[!, "epos"] # end pos of each LAI segment
     nsnps = length(genotyped_snps)
     nsamples = length(genotyped_samples)
     msp_samples = split.(names(msp)[7:end], '.')
     msp_samples = [x[1] for x in msp_samples] |> Vector{String}
+    genotyped_pos = [snp.pos for snp in genotyped_snps]
     per_snp_ancestry_background = Dict{String, BitMatrix}()
-    issorted(spos) || error("spos in mspfile $mspfile is not sorted!")
+    bm2mat_sampleidx = indexin(genotyped_samples, msp_samples)
+
+    # check for errors
+    all(!isnothing, bm2mat_sampleidx) || 
+        error("some sample ID in array data does not have LAI computed in msp file")
+    issorted(spos) && issorted(epos) || error("spos in mspfile $mspfile is not sorted!")
 
     for ancestry1 in 0:n_ancestries-1, ancestry2 in ancestry1:n_ancestries-1
         bm = falses(nsamples, nsnps)
@@ -237,18 +248,25 @@ function create_LAI_mapping_matrices(
         # (ancestry1, ancestry2) = (0, 0) = (AFR, AFR) and (i, j) = (1, 1)
         # then `bm[i, j] = 1` if have both haplotypes for sample 
         # `genotyped_samples[i]` at SNP `genotyped_snps[j]` have AFR background
-        @inbounds @showprogress for i in eachindex(genotyped_samples), j in eachindex(genotyped_snps)
-            jj = max(1, searchsortedlast(spos, genotyped_snps[j].pos))
-            ii = findfirst(x -> x == genotyped_samples[i], msp_samples)
+
+        @inbounds @showprogress for jj in eachindex(spos)
             # (jj, ii) indexes into `mat` (the msp matrix)
             # recall each row of msp matrix is a "ancestry segment" containing 
             # a number of SNPs all of which have the same ancestry background
-            anc1 = mat[jj, ii]
-            anc2 = mat[jj, ii + 1]
-            if (ancestry1 == anc1 && ancestry2 == anc2) || (ancestry1 == anc2 && ancestry2 == anc1)
-                bm[i, j] = true
+            segment = spos[jj]:(epos[jj] - 1)
+            for j in findall(x -> x ∈ segment, genotyped_pos)
+                for (i, ii) in zip(1:nsamples, bm2mat_sampleidx)
+                    anc1 = mat[jj, ii]
+                    anc2 = mat[jj, ii + 1]
+                    anc_match = (ancestry1 == anc1) && (ancestry2 == anc2)
+                    anc_cross_match = (ancestry1 == anc2) && (ancestry2 == anc1)
+                    if anc_match || anc_cross_match
+                        bm[i, j] = true
+                    end
+                end
             end
         end
+
         name = ancestry_names[ancestry1+1] * '_' * ancestry_names[ancestry2+1]
         per_snp_ancestry_background[name] = bm
     end
