@@ -199,6 +199,9 @@ function create_LAI_mapping_matrices(
     ancestry_names::Vector{String} = ["$(ancestry)$(ancestry)" for ancestry in 0:n_ancestries-1]
     )
     # include("/u/home/b/biona001/bge_analysis/concordance/scripts/utilities.jl")
+    # genotype_file = "/u/home/b/biona001/project-loes/gpc_gsa/array/all_GPC_cohorts.chr2.sharedSNPs.vcf.gz"
+    # imputed_file = "/u/home/b/biona001/project-loes/gpc_gsa/imputed/typedSNPs/chr2.vcf.gz"
+    # mspfile = "/u/home/b/biona001/project-loes/gpc_gsa/tbb/gpc_gsa_w2.chr2.typed.deconvolved.msp.tsv"
     # genotype_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed_king/chr22.vcf.gz"
     # imputed_file = "/u/home/b/biona001/project-loes/GLIMPSE2_toni/typedSNPs/chr22.sampleQC.snpQC.vcf.gz"
     # mspfile = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_v2/chr22.msp.tsv"
@@ -248,7 +251,6 @@ function create_LAI_mapping_matrices(
         # (ancestry1, ancestry2) = (0, 0) = (AFR, AFR) and (i, j) = (1, 1)
         # then `bm[i, j] = 1` if have both haplotypes for sample 
         # `genotyped_samples[i]` at SNP `genotyped_snps[j]` have AFR background
-
         @inbounds @showprogress for jj in eachindex(spos)
             # (jj, ii) indexes into `mat` (the msp matrix)
             # recall each row of msp matrix is a "ancestry segment" containing 
@@ -276,13 +278,10 @@ function create_LAI_mapping_matrices(
     for bm in values(per_snp_ancestry_background)
         bm_tot[bm] .+= 1
     end
-    findmax(bm_tot)[1] == 1 || error("sample $(findmax(bm_tot)[2][1]) SNP $(findmax(bm_tot)[2][2]) has >1 ancestry background, shouldn't happen")
+    findmax(bm_tot)[1] == 1 || 
+        error("sample $(findmax(bm_tot)[2][1]) SNP $(findmax(bm_tot)[2][2]) has >1 ancestry background, shouldn't happen")
     z = count(iszero, bm_tot)
-    if z > 0 
-        @warn("$z genotypes has no ancestry background identified, probably shouldn't happen")
-        idx = findfirst(iszero, bm_tot)    
-        @warn("idx $idx has z[idx] = $(z[idx])")
-    end
+    z > 0 && @warn("$z genotypes has no ancestry background identified")
 
     return per_snp_ancestry_background
 end
