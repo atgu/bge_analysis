@@ -126,7 +126,7 @@ function get_aggregate_R2(
     genotype_file::String,
     imputed_file::String;
     summary_file::String = "", # must contain CHR/POS/REF/ALT/isImputed columns
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
     )
     # import data
     Xgeno, Ximpt, mafs, _, _ = import_Xtrue_Ximp(
@@ -159,7 +159,7 @@ function get_aggregate_R2(
     genotype_file::Vector{String},
     imputed_file::Vector{String};
     summary_file::Vector{String} = ["" for _ in eachindex(genotype_files)], # must contain CHR/POS/REF/ALT/isImputed columns
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
     )
     length(genotype_file) == length(imputed_file) == length(summary_file) || 
         error(
@@ -294,7 +294,7 @@ function get_ancestry_specific_r2(
     ancestry_names::Vector{String} = get_ancestry_names(msp_file),
     summary_file::String = "", # must contain CHR/POS/REF/ALT/AF/isImputed columns
     use_dosage::Bool=true, # whether to import imputed data as dosage or genotypes
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
     )
     # import the genotype and imputed data matrices, after matching them
     Xgeno, Ximpt, mafs, samples, snps = import_Xtrue_Ximp(
@@ -366,7 +366,7 @@ function get_ancestry_specific_r2(
     ancestry_names::Vector{String} = get_ancestry_names(msp_file[1]),
     summary_file::Vector{String} = ["" for _ in eachindex(genotype_file)], 
     use_dosage::Bool=true,
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
     )
     n_ancestries = length(ancestry_names)
     n_files = length(genotype_file)

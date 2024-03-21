@@ -41,7 +41,7 @@ s = ArgParseSettings()
         default = ""
         arg_type = String
     "--maf-bins"
-        default = "0.0,0.0005,0.001,0.004,0.0075,0.0125,0.04,0.1,0.2,0.5"
+        default = "0.0,0.0005,0.001,0.005,0.01,0.02,0.03,0.04,0.05,0.1,0.2,0.3,0.4,0.5"
         arg_type = String
 end
 parsed_args = parse_args(s)
