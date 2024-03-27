@@ -126,7 +126,7 @@ function get_aggregate_R2(
     genotype_file::String,
     imputed_file::String;
     summary_file::String = "", # must contain CHR/POS/REF/ALT/isImputed columns
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
     )
     # import data
     Xgeno, Ximpt, mafs, _, _ = import_Xtrue_Ximp(
@@ -159,7 +159,7 @@ function get_aggregate_R2(
     genotype_file::Vector{String},
     imputed_file::Vector{String};
     summary_file::Vector{String} = ["" for _ in eachindex(genotype_files)], # must contain CHR/POS/REF/ALT/isImputed columns
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
     )
     length(genotype_file) == length(imputed_file) == length(summary_file) || 
         error(
@@ -192,53 +192,98 @@ Helper function for creating masking matrices.
 + `n_ancestries`: Number of ancestries used in rfmix2
 """
 function create_LAI_mapping_matrices(
+    genotyped_samples::Vector{String},
+    genotyped_snps::Vector{SNP},
     mspfile::String, 
     n_ancestries::Int;
     ancestry_names::Vector{String} = ["$(ancestry)$(ancestry)" for ancestry in 0:n_ancestries-1]
     )
+    # include("/u/home/b/biona001/bge_analysis/concordance/scripts/utilities.jl")
+    # genotype_file = "/u/home/b/biona001/project-loes/gpc_gsa/array/all_GPC_cohorts.chr2.sharedSNPs.vcf.gz"
+    # imputed_file = "/u/home/b/biona001/project-loes/gpc_gsa/imputed/typedSNPs/chr2.vcf.gz"
+    # mspfile = "/u/home/b/biona001/project-loes/gpc_gsa/tbb/gpc_gsa_w2.chr2.typed.deconvolved.msp.tsv"
+    # genotype_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed_king/chr22.vcf.gz"
+    # imputed_file = "/u/home/b/biona001/project-loes/GLIMPSE2_toni/typedSNPs/chr22.sampleQC.snpQC.vcf.gz"
+    # mspfile = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_v2/chr22.msp.tsv"
+    # summary_file = ""
+    # ancestry_names = get_ancestry_names(mspfile)
+    # use_dosage = true
+    # maf_bins = collect(LinRange(0, 0.5, 100))
+    # n_ancestries = length(ancestry_names)
+    # Xgeno, Ximpt, mafs, genotyped_samples, genotyped_snps = import_Xtrue_Ximp(
+    #     genotype_file, imputed_file, summary_file=summary_file, 
+    #     use_dosage=use_dosage, 
+    # )
+    # @time per_snp_ancestry_background = create_LAI_mapping_matrices(
+    #     genotyped_samples, genotyped_snps, mspfile, n_ancestries, 
+    #     ancestry_names=ancestry_names
+    #     ) # 189 seconds (new code = 7.58 seconds)
+    # @test findall(per_snp_ancestry_background["EUR_EUR"][1:20]) == [1, 2, 3, 4, 6, 7, 10, 15, 17, 19]
+    # @test findall(per_snp_ancestry_background["EUR_EUR"][2341:2380]) == [1, 3, 7, 8, 9, 12, 13, 14, 20, 23, 25, 26, 28, 30, 31, 33, 34, 40]
+    # @test findall(per_snp_ancestry_background["EUR_EUR"][end-20:end]) == [1, 2, 3, 6, 9, 10, 11, 14, 16, 18, 21]
+    # @test findall(per_snp_ancestry_background["AFR_EUR"][1:300]) == [8, 9, 12, 14, 18, 33, 59, 79, 91, 117, 118, 125, 156, 162, 200, 242, 252, 255, 276, 281, 288, 289]
+
     length(ancestry_names) == n_ancestries || 
         error("expected length(ancestry_names) == n_ancestries")
     msp = CSV.read(mspfile, DataFrame, header=2)
     mat = msp[:, 7:end]
-    segment_nsnps = msp[!, "n snps"]
-    nsnps = sum(segment_nsnps)
-    nsamples = size(mat, 2) >> 1
+    spos = msp[!, "spos"] # start pos of each LAI segment
+    epos = msp[!, "epos"] # end pos of each LAI segment
+    nsnps = length(genotyped_snps)
+    nsamples = length(genotyped_samples)
+    msp_samples = split.(names(msp)[7:end], '.')
+    msp_samples = [x[1] for x in msp_samples] |> Vector{String}
+    genotyped_pos = [snp.pos for snp in genotyped_snps]
     per_snp_ancestry_background = Dict{String, BitMatrix}()
+    bm2mat_sampleidx = indexin(genotyped_samples, msp_samples)
+
+    # check for errors
+    all(!isnothing, bm2mat_sampleidx) || 
+        error("some sample ID in array data does not have LAI computed in msp file")
+    issorted(spos) && issorted(epos) || error("spos in mspfile $mspfile is not sorted!")
 
     for ancestry1 in 0:n_ancestries-1, ancestry2 in ancestry1:n_ancestries-1
         bm = falses(nsamples, nsnps)
-        # (i, j) indexes into the n by p bitmatrix `bm`.
-        # `bm[i, j] = true` if the genotype for sample i at SNP j matches
-        # ancestry1 and ancestry2, otherwise `bm[i, j] = 0`. E.g. if
+        # (i, j) indexes into the n by p bitmatrix `bm`
+        # `bm[i, j] = true` if the genotype for sample `genotyped_samples[i]` at
+        # SNP `genotyped_snps[j]` matches ancestry1 and ancestry2, 
+        # otherwise `bm[i, j] = 0`. For example, if
         # (ancestry1, ancestry2) = (0, 0) = (AFR, AFR) and (i, j) = (1, 1)
-        # then `bm[i, j] = 1` if have both haplotypes for sample `i` at SNP `j`
-        # have AFR background
-        for i in 1:nsamples, jj in eachindex(segment_nsnps)
-            # jj indexes into the rows of the msp matrix
+        # then `bm[i, j] = 1` if have both haplotypes for sample 
+        # `genotyped_samples[i]` at SNP `genotyped_snps[j]` have AFR background
+        @inbounds @showprogress for jj in eachindex(spos)
+            # (jj, ii) indexes into `mat` (the msp matrix)
             # recall each row of msp matrix is a "ancestry segment" containing 
             # a number of SNPs all of which have the same ancestry background
-            anc1 = mat[jj, 2i - 1]
-            anc2 = mat[jj, 2i]
-            if (ancestry1 == anc1 && ancestry2 == anc2) || (ancestry1 == anc2 && ancestry2 == anc1)
-                j_start = jj == 1 ? 1 : sum(segment_nsnps[1:jj-1]) + 1
-                j_end = sum(segment_nsnps[1:jj])
-                for j in j_start:j_end
-                    bm[i, j] = true
+            segment = spos[jj]:(epos[jj] - 1)
+            for j in findall(x -> x ∈ segment, genotyped_pos)
+                for (i, ii) in zip(1:nsamples, bm2mat_sampleidx)
+                    anc1 = mat[jj, ii]
+                    anc2 = mat[jj, ii + 1]
+                    anc_match = (ancestry1 == anc1) && (ancestry2 == anc2)
+                    anc_cross_match = (ancestry1 == anc2) && (ancestry2 == anc1)
+                    if anc_match || anc_cross_match
+                        bm[i, j] = true
+                    end
                 end
             end
         end
+
         name = ancestry_names[ancestry1+1] * '_' * ancestry_names[ancestry2+1]
         per_snp_ancestry_background[name] = bm
     end
 
-    # read the sample IDs for masking matrix
-    sampleID = String[]
-    for name in names(msp)[7:end]
-        push!(sampleID, name[1:end-2]) # remove last ".0" or ".1" 
+    # check correctness
+    bm_tot = zeros(Int, nsamples, nsnps)
+    for bm in values(per_snp_ancestry_background)
+        bm_tot[bm] .+= 1
     end
-    unique!(sampleID)    
+    findmax(bm_tot)[1] == 1 || 
+        error("sample $(findmax(bm_tot)[2][1]) SNP $(findmax(bm_tot)[2][2]) has >1 ancestry background, shouldn't happen")
+    z = count(iszero, bm_tot)
+    z > 0 && @warn("$z genotypes has no ancestry background identified")
 
-    return per_snp_ancestry_background, sampleID, nsnps
+    return per_snp_ancestry_background
 end
 
 function get_ancestry_specific_r2(
@@ -248,44 +293,18 @@ function get_ancestry_specific_r2(
     ancestry_names::Vector{String} = get_ancestry_names(msp_file),
     summary_file::String = "", # must contain CHR/POS/REF/ALT/AF/isImputed columns
     use_dosage::Bool=true, # whether to import imputed data as dosage or genotypes
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
     )
-    # compute background ancestries on the phased genotypes
-    n_ancestries = length(ancestry_names)
-    ancestry_masks, _, nsnps = create_LAI_mapping_matrices(
-        msp_file, n_ancestries, ancestry_names=ancestry_names)
-
-    # before continueing, check for a weird error I got on chr10 of PAISA data
-    if nsnps != nrecords(genotype_file)
-        error(
-            "The `n snps` column in msp file does not sum to the number " * 
-            "of SNPs in $genotype_file. I got this weird error before, so " * 
-            "this might be Rfmix2 filtering out SNPs based on unknown criteria"
-        )
-    end
-
     # import the genotype and imputed data matrices, after matching them
     Xgeno, Ximpt, mafs, samples, snps = import_Xtrue_Ximp(
         genotype_file, imputed_file, summary_file=summary_file, 
         use_dosage=use_dosage, 
     )
 
-    # Note: background ancestries were computed on the phased genotypes, 
-    # which gives a 0/1 bit indicating whether the given sample/SNP has a 
-    # specific background ancestry. However, the masking matrices in 
-    # `ancestry_masks` does not come with sample/SNP labeling, so we must 
-    # import that information separately
-    _, array_sampleIDs, array_chr, array_pos, _, array_ref, array_alt = 
-        convert_gt(Float64, genotype_file, save_snp_info=true, 
-        msg="Importing VCF data")
-    array_snps = SNPs(array_chr, array_pos, array_ref, array_alt)
-
-    # figure out which sample/SNPs can be used and subset the masks
-    row_idx = indexin(samples, array_sampleIDs)
-    col_idx = indexin(snps, array_snps)
-    for (ancestry, has_this_ancestry) in ancestry_masks
-        ancestry_masks[ancestry] = has_this_ancestry[row_idx, col_idx]
-    end
+    # compute background ancestries on the phased genotypes
+    n_ancestries = length(ancestry_names)
+    ancestry_masks = create_LAI_mapping_matrices(
+        samples, snps, msp_file, n_ancestries, ancestry_names=ancestry_names)
 
     # prepare dataframe
     df = DataFrame(maf_bins = String[])
@@ -346,7 +365,7 @@ function get_ancestry_specific_r2(
     ancestry_names::Vector{String} = get_ancestry_names(msp_file[1]),
     summary_file::Vector{String} = ["" for _ in eachindex(genotype_file)], 
     use_dosage::Bool=true,
-    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5],
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
     )
     n_ancestries = length(ancestry_names)
     n_files = length(genotype_file)
@@ -357,51 +376,24 @@ function get_ancestry_specific_r2(
     # import everything (note: memory intensive if many chromosomes)
     # 
     ancestry_masks = []
-    nsnps = Int[]
     Xgenos = Matrix{Union{Missing, Float64}}[]
     Ximpts = Matrix{Union{Missing, Float64}}[]
     MAFs = Vector{Float64}[]
     shared_samples = Vector{String}[]
     shared_snps = Vector{SNP}[]
     for i in 1:n_files
-        # compute background ancestries on the phased genotypes
-        ancestry_mask, _, nsnp = create_LAI_mapping_matrices(
-            msp_file[i], n_ancestries, ancestry_names=ancestry_names)
-
-        # before continueing, check for a weird error I got on chr10 of PAISA data
-        if nsnp != nrecords(genotype_file[i])
-            error(
-                "The `n snps` column in msp file does not sum to the number " * 
-                "of SNPs in $(genotype_file[i]). I got this weird error before, so " * 
-                "this might be Rfmix2 filtering out SNPs based on unknown criteria"
-            )
-        end
-
         # import the genotype and imputed data matrices, after matching them
         Xgeno, Ximpt, MAF, shared_sample, shared_snp = import_Xtrue_Ximp(
             genotype_file[i], imputed_file[i], summary_file=summary_file[i], 
             use_dosage=use_dosage, 
         )
 
-        # Note: background ancestries were computed on the phased genotypes, 
-        # which gives a 0/1 bit indicating whether the given sample/SNP has a 
-        # specific background ancestry. However, the masking matrices in 
-        # `ancestry_masks` does not come with sample/SNP labeling, so we must 
-        # import that information separately
-        _, array_sampleIDs, array_chr, array_pos, _, array_ref, array_alt = 
-            convert_gt(Float64, genotype_file[i], save_snp_info=true, 
-            msg="Importing VCF data")
-        array_snps = SNPs(array_chr, array_pos, array_ref, array_alt)
-
-        # figure out which sample/SNPs can be used and subset the masks
-        row_idx = indexin(shared_sample, array_sampleIDs)
-        col_idx = indexin(shared_snp, array_snps)
-        for (ancestry, has_this_ancestry) in ancestry_mask
-            ancestry_mask[ancestry] = has_this_ancestry[row_idx, col_idx]
-        end
+        # compute background ancestries on the phased genotypes
+        ancestry_mask = create_LAI_mapping_matrices(
+            shared_sample, shared_snp, msp_file[i], n_ancestries, 
+            ancestry_names=ancestry_names)
 
         push!(ancestry_masks, ancestry_mask)
-        push!(nsnps, nsnp)
         push!(Xgenos, Xgeno)
         push!(Ximpts, Ximpt)
         push!(MAFs, MAF)
@@ -483,42 +475,16 @@ function get_ancestry_specific_concordance(
     ancestry_names::Vector{String} = get_ancestry_names(msp_file),
     summary_file::String = "", # must contain CHR/POS/REF/ALT/AF/isImputed columns
     )
-    # compute background ancestries on the phased genotypes
-    n_ancestries = length(ancestry_names)
-    ancestry_masks, _, nsnps = create_LAI_mapping_matrices(
-        msp_file, n_ancestries, ancestry_names=ancestry_names)
-
-    # before continueing, check for a weird error I got on chr10 of PAISA data
-    if nsnps != nrecords(genotype_file)
-        error(
-            "The `n snps` column in msp file does not sum to the number " * 
-            "of SNPs in $genotype_file. I got this weird error before, so " * 
-            "this might be Rfmix2 filtering out SNPs based on unknown criteria"
-        )
-    end
-
     # import the genotype and imputed data matrices, after matching them
     Xgeno, Ximpt, mafs, samples, snps = import_Xtrue_Ximp(
         genotype_file, imputed_file, summary_file=summary_file, 
         use_dosage=false, 
     )
 
-    # Note: background ancestries were computed on the phased genotypes, 
-    # which gives a 0/1 bit indicating whether the given sample/SNP has a 
-    # specific background ancestry. However, the masking matrices in 
-    # `ancestry_masks` does not come with sample/SNP labeling, so we must 
-    # import that information separately
-    _, array_sampleIDs, array_chr, array_pos, _, array_ref, array_alt = 
-        convert_gt(Float64, genotype_file, save_snp_info=true, 
-        msg="Importing VCF data")
-    array_snps = SNPs(array_chr, array_pos, array_ref, array_alt)
-
-    # figure out which sample/SNPs can be used and subset the masks
-    row_idx = indexin(samples, array_sampleIDs)
-    col_idx = indexin(snps, array_snps)
-    for (ancestry, has_this_ancestry) in ancestry_masks
-        ancestry_masks[ancestry] = has_this_ancestry[row_idx, col_idx]
-    end
+    # compute background ancestries on the phased genotypes
+    n_ancestries = length(ancestry_names)
+    ancestry_masks = create_LAI_mapping_matrices(
+        samples, snps, msp_file, n_ancestries, ancestry_names=ancestry_names)
 
     # loop through each background ancestry
     result = Dict{String, DataFrame}()

@@ -16,9 +16,9 @@ function make_aggregate_R2_plot(
     maf_bin_xaxis = [(maf_bins[i] + maf_bins[i-1])/2 for i in 2:length(maf_bins)]
     plt = plot(maf_bin_xaxis, aggregate_R2, markershape=:circle, 
         ylabel="Aggregate R2", label=plt_label,
-        xlabel="MAF", ylim=(ymin, ymax), 
-        # xaxis=:log, xlim=(0.00003, 0.6),
-        # xticks=([0.0001, 0.001, 0.01, 0.1, 0.5], ["0.01", "0.1", "1", "10", "50"]),
+        xlabel="MAF (%)", ylim=(ymin, ymax), 
+        xaxis=:log, xlim=(0.0001, 0.6),
+        xticks=([0.001, 0.01, 0.1, 0.5], ["0.1", "1", "10", "50"]),
         legend=:bottomright, title=plt_title,
         size=(400, 400), dpi=300, markerstrokewidth=0, w=3, 
         markersize=markersize, color=my_color, ls=my_series_style
@@ -86,9 +86,9 @@ function make_concordance_plots(
 
     plt = plot(maf_bin_xaxis, concordance_by_maf_bins, markershape=:circle, 
         ylabel="Non-ref conconcordance", label=plt_label,
-        xlabel="MAF", ylim=(ymin, ymax), 
-#         xaxis=:log, xlim=(0.0003, 0.6),
-#         xticks=([0.001, 0.01, 0.1, 0.5], ["0.1", "1", "10", "50"]),
+        xlabel="MAF (%)", ylim=(ymin, ymax), 
+        xaxis=:log, xlim=(0.0001, 0.6),
+        xticks=([0.001, 0.01, 0.1, 0.5], ["0.1", "1", "10", "50"]),
         legend=:bottomright, title=plt_title, markersize=markersize, 
         size=(400, 400), dpi=300, markerstrokewidth=0, w=3, 
         color=my_color, ls=my_series_style)
