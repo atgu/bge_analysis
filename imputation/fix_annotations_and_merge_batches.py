@@ -1,43 +1,31 @@
 __authors__ = 'Toni Boltz and Lindo Nkambule'
 
 import hailtop.batch as hb
+import hail as hl
 import subprocess
 import os
 
-def convert_to_vcf(b, batch, chrom):
-    
-    j = b.new_job(name=f'convert-bcf-to-vcf-{chrom}')    
-    j.cpu(4)
-    j.storage('10Gi')
+def get_file_size(file):
+    file_info = hl.utils.hadoop_stat(file)
+    size_bytes = file_info['size_bytes']
+    size_gigs = size_bytes / (1024 * 1024 * 1024)
+    return size_gigs
+
+def convertBCF2table(bcf_batch, chrom, storage):
+
+    j = b.new_job(name=f'convert-bcfs2table-{chrom}')
+
+    j.memory(f'{storage}Gi')
+    j.storage(f'{storage}Gi')
     j.image('us.gcr.io/broad-dsde-methods/glimpse:palantir-workflows_20c9de0')
-
-    batch_name = "neurogap_gsa_batch" + batch + ".imputed.chr" + str(chrom)
-    path = "gs://neurogap-bge-imputed-regional/glimpse2/gsa/"
-    full_path = path + batch_name
-
-    bcf_batch=b.read_input_group(
-        bcf=f'{full_path}.bcf',
-        csi=f'{full_path}.bcf.csi')
-    
-    j.command(f'''bcftools view {bcf_batch['bcf']} -Ov -o {j.ofile}''')
-
-    return j
-
-
-def convertVCF2table(vcf_batch, chrom):
-
-    j = b.new_job(name=f'convert-vcfs2table-{chrom}')
-
-    j.cpu(4)
-    j.storage('10Gi')
-    j.image('us.gcr.io/broad-gatk/gatk:4.3.0.0')
 
     # output handler                                                                                                                 
     j.declare_resource_group(ofile={
         'tsv.gz': '{root}.tsv.gz'})
 
-    j.command(f'''gatk VariantsToTable -V {vcf_batch} -O temp.tsv -F CHROM -F POS -F REF -F ALT -F AF -F INFO ''')
-    j.command(f'''bgzip -c temp.tsv > {j.ofile['tsv.gz']}''')
+    j.command(f'''bcftools query -f '%CHROM %POS %REF %ALT %AF %INFO/INFO\n' {bcf_batch['bcf']} > temp.tsv''')
+    j.command(f''' echo -e "CHROM POS REF ALT AF INFO" > temp_wheader.tsv && cat temp.tsv >> temp_wheader.tsv ''')
+    j.command(f'''bgzip -c temp_wheader.tsv > {j.ofile['tsv.gz']}''')
 
     return j
 
@@ -45,8 +33,8 @@ def convertVCF2table(vcf_batch, chrom):
 def af_info_python(file_list, num_sample_list, chrom):
 
     p = b.new_job(name=f'fix-af-info-annot-chr{chrom}')  # define job  
-    p.cpu(4)
-    p.storage('10Gi')
+    p.memory("highmem")
+    p.storage('1Gi')
     
     p.image('docker.io/tboltz/python-fix_af_info-script')
 
@@ -84,7 +72,7 @@ def calculate_info(row):
         1 - (sum([(1 - row[f"INFO_{{i}}"]) * 2 * num_samples[i] * row[f"AF_{{i}}"] * (1 - row[f"AF_{{i}}"]) for i in range(num_batches)])) / \
             (2 * sum(num_samples) * aggregated_af * (1 - aggregated_af))
 
-annotation_dfs = [pd.read_csv(input_filename, sep="\t").rename(columns={{"AF": f"AF_{{i}}", "INFO": f"INFO_{{i}}"}}) for i, input_filename in enumerate(input_filenames)]
+annotation_dfs = [pd.read_csv(input_filename, sep=" ").rename(columns={{"AF": f"AF_{{i}}", "INFO": f"INFO_{{i}}"}}) for i, input_filename in enumerate(input_filenames)]
 
 annotations_merged = functools.reduce(lambda left, right: pd.merge(left, right, on=["CHROM", "POS", "REF", "ALT"], how="inner", validate="one_to_one"), annotation_dfs)
 
@@ -102,16 +90,16 @@ annotations_merged.to_csv("temp_file.csv", sep="\t", columns=["CHROM", "POS", "R
     return p
 
 
-def merge_batches(bcf_batch_list, annot, chrom):
+def merge_batches(bcf_batch_list, annot, chrom, storage):
     m = b.new_job(name=f'merge-batches-reannotate-{chrom}')  # define job     
 
-    m.cpu(4)
-    m.storage('10Gi')
+    m.memory(f'{storage}Gi')
+    m.storage(f'{storage}Gi')
     m.image('us.gcr.io/broad-dsde-methods/glimpse:palantir-workflows_20c9de0')
 
     m.declare_resource_group(ofile={
-        'vcf.gz': '{root}.vcf.gz',
-        'vcf.gz.csi': '{root}.vcf.gz.csi'})
+        'bcf': '{root}.bcf',
+        'bcf.csi': '{root}.bcf.csi'})
 
     bcf_batch_names = ' '.join([f"{v['bcf']}" for v in bcf_batch_list])
 
@@ -120,8 +108,8 @@ def merge_batches(bcf_batch_list, annot, chrom):
     m.command(f'''bgzip -c {annot} > {annot}.gz''')
     m.command(f'''tabix -s1 -b2 -e2  {annot}.gz''')
     
-    m.command(f'''bcftools annotate -a {annot}.gz -c CHROM,POS,REF,ALT,AF,INFO -O z -o {m.ofile['vcf.gz']} merged_batches.vcf.gz ''')
-    m.command(f'''bcftools index {m.ofile['vcf.gz']}''')
+    m.command(f'''bcftools annotate -a {annot}.gz -c CHROM,POS,REF,ALT,AF,INFO -O z -o {m.ofile['bcf']} merged_batches.vcf.gz ''')
+    m.command(f'''bcftools index {m.ofile['bcf']}''')
 
     return m
     
@@ -130,27 +118,33 @@ if __name__ == '__main__':
 
     backend = hb.ServiceBackend(billing_project='neale-pumas-bge',
                                 remote_tmpdir='gs://neurogap-bge-imputed-regional',regions=['us-central1'])  # set up backend                                                            
-    b = hb.Batch(backend=backend, name=f'merge-bcfs') # define batch   
+    b = hb.Batch(backend=backend, name=f'NGAP-wave2-merge-bcfs') # define batch   
     
-    sample_batches = ['00', '01', '02', '03', '04']
+    sample_batches = ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17']
 
-    num_samples = [200, 200, 200, 200, 54]
+    num_samples = [200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 202]
     
-    for n in range(1, 22):
-        
-        run_convert_to_vcf = [convert_to_vcf(b, batch,  f'{n}') for batch in sample_batches] 
-        run_vcf2table = [convertVCF2table(i.ofile,f'chr{n}') for i in run_convert_to_vcf]
-
-        # run python script to create aggregated annotation files per chromosome across all batches
-        annot_file = af_info_python(run_vcf2table, num_samples, f'{n}')
+    for n in range(1, 23):
 
         batch_list=[b.read_input_group(
-                bcf=f'gs://neurogap-bge-imputed-regional/glimpse2/gsa/neurogap_gsa_batch{i}.imputed.chr{n}.bcf',                                                
-                csi=f'gs://neurogap-bge-imputed-regional/glimpse2/gsa/neurogap_gsa_batch{i}.imputed.chr{n}.bcf.csi') for i in sample_batches]
-        
-        run_merge_batches = merge_batches(batch_list, annot_file.ofile, f'chr{n}')
+            bcf=f'gs://neurogap-bge-imputed-regional/glimpse2/neurogap_wave2_batch{i}.imputed.chr{n}.bcf',
+            csi=f'gs://neurogap-bge-imputed-regional/glimpse2/neurogap_wave2_batch{i}.imputed.chr{n}.bcf.csi') for i in sample_batches]
 
-        b.write_output(run_merge_batches.ofile, f'gs://neurogap-bge-imputed-regional/glimpse2/merged/gsa_merged_chr{n}')
+        batch_list_names = [f'gs://neurogap-bge-imputed-regional/glimpse2/neurogap_wave2_batch{i}.imputed.chr{n}.bcf' for i in sample_batches]
+        
+        bcf_sizes = [round(get_file_size(batch))for batch in batch_list_names]
+        storages = [round(size) for size in bcf_sizes]
+
+        run_bcf2table = [convertBCF2table(batch, f'chr{n}', storage) for batch, storage in zip(batch_list, storages)]
+        
+        # run python script to create aggregated annotation files per chromosome across all batches
+        annot_file = af_info_python(run_bcf2table, num_samples, f'{n}')
+
+        total_storage = (sum(storages))*10
+        
+        run_merge_batches = merge_batches(batch_list, annot_file.ofile, f'chr{n}', total_storage)
+
+        b.write_output(run_merge_batches.ofile, f'gs://neurogap-bge-imputed-regional/glimpse2/merged_bcfs/neurogap_wave2_merged_chr{n}')
 
     b.run(wait=False) # run batch
 
