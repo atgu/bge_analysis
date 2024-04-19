@@ -93,7 +93,7 @@ annotations_merged.to_csv("temp_file.csv", sep="\t", columns=["CHROM", "POS", "R
 def merge_batches(bcf_batch_list, annot, chrom, storage):
     m = b.new_job(name=f'merge-batches-reannotate-{chrom}')  # define job     
 
-    m.memory(f'{storage}Gi')
+    m.cpu(8).memory('highmem')
     m.storage(f'{storage}Gi')
     m.image('us.gcr.io/broad-dsde-methods/glimpse:palantir-workflows_20c9de0')
 
