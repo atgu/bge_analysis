@@ -8,15 +8,15 @@ import os
 def get_file_size(file):
     file_info = hl.utils.hadoop_stat(file)
     size_bytes = file_info['size_bytes']
-    size_gigs = size_bytes / (1024 * 1024 * 1024)
-    return size_gigs
+    size_mb = size_bytes / (1024 * 1024)
+    return size_mb
 
 def convertBCF2table(bcf_batch, chrom, storage):
 
     j = b.new_job(name=f'convert-bcfs2table-{chrom}')
 
-    j.memory(f'{storage}Gi')
-    j.storage(f'{storage}Gi')
+    j.memory(f'{storage}M')
+    j.storage(f'{storage}M')
     j.image('us.gcr.io/broad-dsde-methods/glimpse:palantir-workflows_20c9de0')
 
     # output handler                                                                                                                 
@@ -140,7 +140,7 @@ if __name__ == '__main__':
         # run python script to create aggregated annotation files per chromosome across all batches
         annot_file = af_info_python(run_bcf2table, num_samples, f'{n}')
 
-        total_storage = (sum(storages))*4
+        total_storage = (sum(storages))*6/1024 #multiplied by 6 to give plenty of extra room, and converted to GB   
         
         run_merge_batches = merge_batches(batch_list, annot_file.ofile, f'chr{n}', total_storage)
 
