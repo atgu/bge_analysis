@@ -133,7 +133,7 @@ if __name__ == '__main__':
         batch_list_names = [f'gs://neurogap-bge-imputed-regional/glimpse2/neurogap_wave2_batch{i}.imputed.chr{n}.bcf' for i in sample_batches]
         
         bcf_sizes = [round(get_file_size(batch))for batch in batch_list_names]
-        storages = [round(size) for size in bcf_sizes]
+        storages = [round(size)*2 for size in bcf_sizes]
 
         run_bcf2table = [convertBCF2table(batch, f'chr{n}', storage) for batch, storage in zip(batch_list, storages)]
         
