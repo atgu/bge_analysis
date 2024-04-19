@@ -33,7 +33,7 @@ def convertBCF2table(bcf_batch, chrom, storage):
 def af_info_python(file_list, num_sample_list, chrom):
 
     p = b.new_job(name=f'fix-af-info-annot-chr{chrom}')  # define job  
-    p.memory("highmem")
+    p.cpu(4).memory("highmem")
     p.storage('1Gi')
     
     p.image('docker.io/tboltz/python-fix_af_info-script')
