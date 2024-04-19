@@ -103,12 +103,12 @@ def merge_batches(bcf_batch_list, annot, chrom, storage):
 
     bcf_batch_names = ' '.join([f"{v['bcf']}" for v in bcf_batch_list])
 
-    m.command(f'''bcftools merge {bcf_batch_names} -Oz -o /io/merged_batches.vcf.gz''')
+    m.command(f'''bcftools merge {bcf_batch_names} -Ob -o /io/merged_batches.bcf''')
 
     m.command(f'''bgzip -c {annot} > {annot}.gz''')
     m.command(f'''tabix -s1 -b2 -e2  {annot}.gz''')
     
-    m.command(f'''bcftools annotate -a {annot}.gz -c CHROM,POS,REF,ALT,AF,INFO -O z -o {m.ofile['bcf']} /io/merged_batches.vcf.gz ''')
+    m.command(f'''bcftools annotate -a {annot}.gz -c CHROM,POS,REF,ALT,AF,INFO -Ob -o {m.ofile['bcf']} /io/merged_batches.bcf ''')
     m.command(f'''bcftools index {m.ofile['bcf']}''')
 
     return m
