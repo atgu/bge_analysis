@@ -140,7 +140,7 @@ if __name__ == '__main__':
         # run python script to create aggregated annotation files per chromosome across all batches
         annot_file = af_info_python(run_bcf2table, num_samples, f'{n}')
 
-        total_storage = (sum(storages))*10
+        total_storage = (sum(storages))*4
         
         run_merge_batches = merge_batches(batch_list, annot_file.ofile, f'chr{n}', total_storage)
 
