@@ -90,6 +90,12 @@ def compute_metrics(df_imputed, df_true):
         alleles_imputed = alleles_imputed[common_indices]
         alleles_true = alleles_true[common_indices]
 
+        if np.all(alleles_true == 0):
+            sensitivity.append(None)
+            precision.append(None)
+            concordance.append(None)
+            continue
+
         true_positives = np.sum((alleles_imputed == alleles_true) & (alleles_imputed != 0))
         false_positives = np.sum((alleles_imputed != alleles_true) & (alleles_imputed != 0))
         false_negatives = np.sum((alleles_imputed == 0) & (alleles_true != 0))
@@ -271,7 +277,8 @@ df_metrics.to_csv(df_metrics_fname,index=False)
 print(f"Per-SNP non-reference concordance CSV written to {df_metrics_fname}\n")
 
 df_metrics['MAF_bin'] = pd.cut(df_metrics['MAF'], maf_bins)
-df_binned = df_metrics.groupby('MAF_bin').agg({
+df_filtered = df_metrics[df_metrics['Non-Ref Concordance'].notna()]
+df_binned = df_filtered.groupby('MAF_bin').agg({
     'Non-Ref Concordance': 'mean',
     'SNP': 'count'}).reset_index()
 
