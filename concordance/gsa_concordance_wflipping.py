@@ -103,39 +103,27 @@ def compute_metrics(df_imputed, df_true):
 
     return sensitivity, precision, concordance
 
-def get_aggregate_R2(geno_df, imp_df, maf_bins=None):
-
+def get_aggregate_R2_generator(geno_df, imp_df, maf_bins=None):
     if maf_bins is None:
-        maf_bins = list(np.linspace(0,0.5,num=100))
-
-    R2 = []
-    nsnps = []
-    maf_category = []
+        maf_bins = np.linspace(0, 0.5, num=100)
 
     for i in range(1, len(maf_bins)):
-        # find SNPs in current bin
-        bin_low, bin_high = maf_bins[i-1], maf_bins[i]
-        idx = np.where((bin_low <= maf_df['MAF']) & (maf_df['MAF'] < bin_high))[0]
-        maf_cat = str(bin_low) + "-" + str(bin_high)
-        maf_category.append(maf_cat)
+        bin_low, bin_high = maf_bins[i - 1], maf_bins[i]
+        maf_cat = f"{bin_low}-{bin_high}"
 
+        idx = np.where((bin_low <= maf_df['MAF']) & (maf_df['MAF'] < bin_high))[0]
         if len(idx) == 0:
             print(f"maf_bin [{bin_low}, {bin_high}] has no SNP! Assigning R2 of NaN")
-            R2.append(np.nan)
-            nsnps.append(0)
+            yield np.nan, 0, maf_cat
             continue
 
-        # compute squared pearson correlation
         truth = np.ravel(geno_df.iloc[idx,])
         imptd = np.ravel(imp_df.iloc[idx,])
 
         non_missing_idx = np.intersect1d(np.where(~np.isnan(truth))[0], np.where(~np.isnan(imptd))[0])
         my_R2 = pearsonr(truth[non_missing_idx], imptd[non_missing_idx])[0] ** 2
-        R2.append(my_R2)
-        nsnps.append(len(idx))
-
-    return R2, nsnps, maf_category
-
+        yield my_R2, len(idx), maf_cat
+        
 #get necessary inputs from command line
 imputed_filename=sys.argv[1]
 gsa_filename=sys.argv[2]
@@ -291,9 +279,9 @@ print(f"Binned non-reference concordance CSV written to {df_binned_fname}\n")
 
 ########### compute aggregate R2 ############
 print("Computing aggregated R2...\n")
-r2, nsnps, maf = get_aggregate_R2(gsa_fixed,imputed_ds_fixed)
+r2_list, nsnps_list, maf_list = zip(*get_aggregate_R2_generator(gsa_fixed, imputed_ds_fixed))
 print("Computed aggregated R2\n")
-aggregation_df = pd.DataFrame(list(zip(maf, nsnps, r2)), columns=['maf_category', 'number_of_snps', 'R2'])
+aggregation_df = pd.DataFrame({'maf_category': maf_list, 'number_of_snps': nsnps_list, 'R2': r2_list})
 
 agg_df_name = cohort_name + "_aggregation_R2_table.csv"
 aggregation_df.to_csv(agg_df_name,index=False)
