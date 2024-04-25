@@ -87,7 +87,9 @@ if __name__ == '__main__':
             fai='gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.fai')
         
         for n in range(1, 23):
-
+            
+            mem_type="standard" #if any CHR fails due to "Out of Memory", change this to "highmem"
+            
             # a reference panel of haplotypes (only bi-allelic snps)                                                    
             bcf_path = f'gs://bge-regional/bge/reference_panel/hgdp.tgp.trio/mac_cutoff/mac_2/hgdp.tgp.onlysnps.chr{n}.mac2.vcf.gz'
             ref_bcf = b.read_input_group(**{'vcf.gz': bcf_path,
