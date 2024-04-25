@@ -38,13 +38,13 @@ subset them so their are on the same set of SNPs. If REF/ALT is opposite in
 `genotype_file` and `imputed_file`, we will flip corresponding entries in 
 `genotype_file` so that the dosages from `genotype_file` and genotypes of 
 `imputed_file` can be correlated directly. Minor allele frequency is computed
-based on `genotype_file`
+    based on `genotype_file`
 """
 function import_Xtrue_Ximp(
     genotype_file::String, # VCF (will import GT field)
     imputed_file::String; # VCF (import DS = dosage field, unless use_dosage=false, in which case we import GT)
     summary_file::String = "", # must contain CHR/POS/REF/ALT/isImputed columns
-    use_dosage::Bool=true
+    use_dosage::Bool=true,
     )
     # import array genotype data
     array_data, array_sampleID, array_chr, array_pos, _, array_ref, array_alt = 
@@ -199,9 +199,9 @@ function create_LAI_mapping_matrices(
     ancestry_names::Vector{String} = ["$(ancestry)$(ancestry)" for ancestry in 0:n_ancestries-1]
     )
     # include("/u/home/b/biona001/bge_analysis/concordance/scripts/utilities.jl")
-    # genotype_file = "/u/home/b/biona001/project-loes/gpc_gsa/array/all_GPC_cohorts.chr2.sharedSNPs.vcf.gz"
-    # imputed_file = "/u/home/b/biona001/project-loes/gpc_gsa/imputed/typedSNPs/chr2.vcf.gz"
-    # mspfile = "/u/home/b/biona001/project-loes/gpc_gsa/tbb/gpc_gsa_w2.chr2.typed.deconvolved.msp.tsv"
+    # genotype_file = "/u/home/b/biona001/project-loes/gpc_gsa/array/all_GPC_cohorts.chr20.sharedSNPs.vcf.gz"
+    # imputed_file = "/u/home/b/biona001/project-loes/gpc_gsa/imputed/typedSNPs/chr20.vcf.gz"
+    # mspfile = "/u/home/b/biona001/project-loes/gpc_gsa/tbb/gpc_gsa_w2.chr20.typed.deconvolved.msp.tsv"
     # genotype_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed_king/chr22.vcf.gz"
     # imputed_file = "/u/home/b/biona001/project-loes/GLIMPSE2_toni/typedSNPs/chr22.sampleQC.snpQC.vcf.gz"
     # mspfile = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_v2/chr22.msp.tsv"
@@ -357,7 +357,7 @@ end
 # summary_file = ["", ""]
 # ancestry_names = get_ancestry_names(msp_file[1])
 # use_dosage = true
-# maf_bins = collect(LinRange(0, 0.5, 100))
+# maf_bins = [0.0, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
 function get_ancestry_specific_r2(
     genotype_file::Vector{String}, # VCF files (will import GT field), e.g. one for each chr
     imputed_file::Vector{String}, # VCF files (import DS field, unless use_dosage=false, in which case we import GT)
@@ -382,6 +382,7 @@ function get_ancestry_specific_r2(
     shared_samples = Vector{String}[]
     shared_snps = Vector{SNP}[]
     for i in 1:n_files
+        println("processing file $i / $n_files"); flush(stdout)
         # import the genotype and imputed data matrices, after matching them
         Xgeno, Ximpt, MAF, shared_sample, shared_snp = import_Xtrue_Ximp(
             genotype_file[i], imputed_file[i], summary_file=summary_file[i], 
@@ -430,7 +431,7 @@ function get_ancestry_specific_r2(
     #     append_R2_to_df
     # end
     nsnps = zeros(length(maf_bins) - 1, length(ancestry_masks[1]))
-    for i in 2:length(maf_bins)
+    @showprogress for i in 2:length(maf_bins)
         bin_low, bin_high = maf_bins[i-1], maf_bins[i]
         truth = [Union{Missing, Float64}[] for _ in 1:length(keys(ancestry_masks[1]))]
         imptd = [Union{Missing, Float64}[] for _ in 1:length(keys(ancestry_masks[1]))]
@@ -448,6 +449,7 @@ function get_ancestry_specific_r2(
             end
         end
         for (k, ancestry) in enumerate(keys(ancestry_masks[1]))
+            println("Ancestry $ancestry has $(length(truth[k])) genotypes")
             df[i-1, ancestry] = aggregate_R2(truth[k], imptd[k])
             nsnps[i-1, k] += length(truth[k])
         end
@@ -459,21 +461,23 @@ function get_ancestry_specific_r2(
     return df, nsnps
 end
 
-# computes non-reference concordance by local ancestry background
 # chr = 22
-# genotype_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed/chr$chr.vcf.gz"
-# imputed_file = "/u/home/b/biona001/project-loes/paisa_tmp/genotype_dosages/chr$chr.vcf.gz"
-# msp_file = "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_chibchan_imputed/chr$chr.msp.tsv"
+# genotype_file = "/u/home/b/biona001/project-loes/gpc_gsa/array/chr$chr.vcf.gz"
+# imputed_file = "/u/home/b/biona001/project-loes/gpc_gsa/imputed/typedSNPs/chr22.vcf.gz"
+# msp_file = "/u/home/b/biona001/project-loes/gpc_gsa/tbb/gpc_gsa_w2.chr22.typed.deconvolved.msp.tsv"
+# summary_file = ""
+# ancestry_names = get_ancestry_names(msp_file[1])
 # summary_file = ""
 # ancestry_names = get_ancestry_names(msp_file)
-# maf_bins = [0.0, 0.0005, 0.001, 0.004, 0.0075, 0.0125, 0.04, 0.1, 0.2, 0.5]
-# result = get_ancestry_specific_concordance(genotype_file, imputed_file, msp_file)
+# maf_bins = collect(LinRange(0, 0.5, 100))
+# df, nsnps = get_ancestry_specific_concordance(genotype_file, imputed_file, msp_file, maf_bins=maf_bins)
 function get_ancestry_specific_concordance(
     genotype_file::String, # VCF (will import GT field)
     imputed_file::String, # VCF (import DS field, unless use_dosage=false, in which case we import GT)
     msp_file::String; # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
     ancestry_names::Vector{String} = get_ancestry_names(msp_file),
     summary_file::String = "", # must contain CHR/POS/REF/ALT/AF/isImputed columns
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
     )
     # import the genotype and imputed data matrices, after matching them
     Xgeno, Ximpt, mafs, samples, snps = import_Xtrue_Ximp(
@@ -486,37 +490,165 @@ function get_ancestry_specific_concordance(
     ancestry_masks = create_LAI_mapping_matrices(
         samples, snps, msp_file, n_ancestries, ancestry_names=ancestry_names)
 
-    # loop through each background ancestry
-    result = Dict{String, DataFrame}()
-    for (ancestry, has_this_ancestry) in ancestry_masks
-        contigency_tables = ContingencyTable[]
-        ngenotypes = Int[] # tracks how many samples have `ancestry` background for each SNP
-        for j in 1:size(Xgeno, 2)
-            mask = @view(has_this_ancestry[:, j])
-            truth = @view(Xgeno[mask, j])
-            imptd = @view(Ximpt[mask, j])
-            snp_j_contigency = compute_concordance(truth, imptd)
-            push!(contigency_tables, snp_j_contigency)
-            push!(ngenotypes, sum(mask))
+    # prepare dataframe
+    df = DataFrame(maf_bins = String[])
+    for i in 1:length(maf_bins)-1
+        if i == length(maf_bins)
+            push!(df[!, "maf_bins"], "[$(maf_bins[i]), $(maf_bins[i+1])]")
+        else
+            push!(df[!, "maf_bins"], "[$(maf_bins[i]), $(maf_bins[i+1]))")
         end
-
-        # compute sensitivities/precision/non-ref-concordance for this ancestry
-        sensitivities = sensitivity.(contigency_tables)
-        precisions = precision.(contigency_tables)
-        nonref_concordances = nonref_concordance.(contigency_tables)
-
-        # save result in dataframe
-        df = DataFrame("MAF"=>mafs, "sensitivities"=>sensitivities, 
-            "precisions"=>precisions, "nonref_concordances"=>nonref_concordances,
-            "ngenotypes"=>ngenotypes)
-        result[ancestry] = df
     end
 
-    # returns a list of dataframes, one for each ancestry background,
-    # containing maf/sensitivity/precision/nonref_concordances, as well as 
-    # `ngenotypes` which tracks how many samples the given `ancestry` background
-    # for each SNP
-    return result
+    # loop through each background ancestry
+    nsnps = zeros(length(maf_bins) - 1, length(ancestry_masks))
+    counter = 1
+    for (ancestry, has_this_ancestry) in ancestry_masks
+        # compute concordance
+        nonref_concordances = Float64[]
+        for i in 2:length(maf_bins)
+            # find SNPs in current bin
+            bin_low, bin_high = maf_bins[i-1], maf_bins[i]
+            idx = findall(x -> bin_low ≤ x < bin_high, mafs)
+            if length(idx) == 0
+                @warn("maf_bin [$bin_low, $bin_high] has no SNP! Assining concordance of NaN")
+                push!(nonref_concordances, NaN)
+                continue
+            end
+
+            # compute accuracy
+            mask = has_this_ancestry[:, idx]
+            truth = @view(Xgeno[:, idx][mask])
+            imptd = @view(Ximpt[:, idx][mask])
+            contingency_table = compute_concordance(truth, imptd)
+            push!(nonref_concordances, nonref_concordance(contingency_table))
+            nsnps[i-1, counter] = length(idx) # record number of SNPs used to compute R2
+        end
+        df[!, ancestry] = nonref_concordances
+        counter += 1
+    end
+
+    # returns a dataframe containing aggregate nonref_concordances for different ancestries
+    # the second return argument is the number of SNPs in each bin used to 
+    # calculate the given nonref_concordances
+    return df, nsnps
+end
+
+# genotype_file = ["/u/home/b/biona001/project-loes/gpc_gsa/array/chr21.vcf.gz", "/u/home/b/biona001/project-loes/gpc_gsa/array/chr22.vcf.gz"]
+# imputed_file = ["/u/home/b/biona001/project-loes/gpc_gsa/imputed/typedSNPs/chr21.vcf.gz", "/u/home/b/biona001/project-loes/gpc_gsa/imputed/typedSNPs/chr22.vcf.gz"]
+# msp_file = ["/u/home/b/biona001/project-loes/gpc_gsa/tbb/gpc_gsa_w2.chr21.typed.deconvolved.msp.tsv", "/u/home/b/biona001/project-loes/gpc_gsa/tbb/gpc_gsa_w2.chr22.typed.deconvolved.msp.tsv"]
+# genotype_file = ["/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed_king/chr21.vcf.gz", "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/QC_hg38_conformed_king/chr22.vcf.gz"]
+# imputed_file = ["/u/home/b/biona001/project-loes/GLIMPSE2_toni/typedSNPs/chr21.sampleQC.snpQC.vcf.gz", "/u/home/b/biona001/project-loes/GLIMPSE2_toni/typedSNPs/chr22.sampleQC.snpQC.vcf.gz"]
+# msp_file = ["/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_v2/chr21.msp.tsv", "/u/home/b/biona001/project-loes/ForBen_genotypes_subset/LAI/output_v2/chr22.msp.tsv"]
+# summary_file = ["", ""]
+# ancestry_names = get_ancestry_names(msp_file[1])
+# maf_bins = collect(LinRange(0, 0.5, 100))
+# df, nsnps = get_ancestry_specific_concordance(genotype_file, imputed_file, msp_file, maf_bins=maf_bins)
+function get_ancestry_specific_concordance(
+    genotype_file::Vector{String}, # VCF files (will import GT field), e.g. one for each chr
+    imputed_file::Vector{String}, # VCF files (import DS field, unless use_dosage=false, in which case we import GT)
+    msp_file::Vector{String}; # output of Rfmix2 (input to Rfmix2 MUST be genotype_file)
+    ancestry_names::Vector{String} = get_ancestry_names(msp_file[1]),
+    summary_file::Vector{String} = ["" for _ in eachindex(genotype_file)], 
+    maf_bins::Vector{Float64}=[0.0, 0.0005, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
+    )
+    n_ancestries = length(ancestry_names)
+    n_files = length(genotype_file)
+    n_files == length(imputed_file) == length(msp_file) == 
+        length(summary_file) || error("Input files should have same length")
+
+    #
+    # import everything (note: memory intensive if many chromosomes)
+    # 
+    ancestry_masks = []
+    Xgenos = Matrix{Union{Missing, Float64}}[]
+    Ximpts = Matrix{Union{Missing, Float64}}[]
+    MAFs = Vector{Float64}[]
+    shared_samples = Vector{String}[]
+    shared_snps = Vector{SNP}[]
+    for i in 1:n_files
+        println("processing file $i / $n_files"); flush(stdout)
+        # import the genotype and imputed data matrices, after matching them
+        Xgeno, Ximpt, MAF, shared_sample, shared_snp = import_Xtrue_Ximp(
+            genotype_file[i], imputed_file[i], summary_file=summary_file[i], 
+            use_dosage=false, 
+        )
+
+        # compute background ancestries on the phased genotypes
+        ancestry_mask = create_LAI_mapping_matrices(
+            shared_sample, shared_snp, msp_file[i], n_ancestries, 
+            ancestry_names=ancestry_names)
+
+        push!(ancestry_masks, ancestry_mask)
+        push!(Xgenos, Xgeno)
+        push!(Ximpts, Ximpt)
+        push!(MAFs, MAF)
+        push!(shared_samples, shared_sample)
+        push!(shared_snps, shared_snp)
+    end
+
+    # prepare dataframe
+    df = DataFrame(maf_bins = String[])
+    for i in 1:length(maf_bins)-1
+        if i == length(maf_bins)
+            push!(df[!, "maf_bins"], "[$(maf_bins[i]), $(maf_bins[i+1])]")
+        else
+            push!(df[!, "maf_bins"], "[$(maf_bins[i]), $(maf_bins[i+1]))")
+        end
+    end
+    for ancestry in keys(ancestry_masks[1])
+        df[!, ancestry] = zeros(size(df, 1)) # allocate R2 vector
+    end
+
+    #
+    # aggregate LAI segments for each MAF bin
+    #
+    # pseudo code:
+    # for EACH_MAF_BIN
+    #     truth, imptd = Float64[], Float64[]
+    #     for EACH_CHR 
+    #         for EACH_ANCESTRY
+    #             append_to_truth
+    #             append_to_imptd
+    #         end
+    #     end
+    #     concordance = compute_concordance(truth, imptd)
+    #     append_concordance_to_df
+    # end
+    nsnps = zeros(length(maf_bins) - 1, length(ancestry_masks[1]))
+    @showprogress for i in 2:length(maf_bins)
+        bin_low, bin_high = maf_bins[i-1], maf_bins[i]
+        truth = [Union{Missing, Float64}[] for _ in 1:length(keys(ancestry_masks[1]))]
+        imptd = [Union{Missing, Float64}[] for _ in 1:length(keys(ancestry_masks[1]))]
+        for j in 1:n_files
+            # current Xtrue and Ximputed
+            Xgeno, Ximpt, MAF, ancestry_mask = Xgenos[j], Ximpts[j], MAFs[j], ancestry_masks[j]
+            idx = findall(x -> bin_low ≤ x < bin_high, MAF)
+            length(idx) == 0 && continue
+
+            # loop through different LAI
+            for (k, has_this_ancestry) in enumerate(values(ancestry_mask))
+                mask = has_this_ancestry[:, idx]
+                append!(truth[k], @view(Xgeno[:, idx][mask]))
+                append!(imptd[k], @view(Ximpt[:, idx][mask]))
+            end
+        end
+        for (k, ancestry) in enumerate(keys(ancestry_masks[1]))
+            println("Ancestry $ancestry has $(length(truth[k])) genotypes")
+
+            # compute sensitivities/precision/non-ref-concordance for this ancestry
+            contigency_table = compute_concordance(truth[k], imptd[k])
+            df[i-1, ancestry] = nonref_concordance(contigency_table)
+            nsnps[i-1, k] += length(truth[k])
+            # sensitivities = sensitivity(contigency_table)
+            # precisions = precision(contigency_table)
+        end
+    end
+
+    # returns a dataframe containing nonref concordance for different ancestries
+    # the second return argument is the number of SNPs in each bin used to 
+    # calculate the given nonref_concordances
+    return df, nsnps
 end
 
 """
