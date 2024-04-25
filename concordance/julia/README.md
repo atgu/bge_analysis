@@ -8,8 +8,6 @@ We used a few metrics for evaluating GLIMPSE's imputation accuracy:
 3. Aggregate R2 (squared Pearson's correlation)
 4. Aggregate R2 but stratifying SNPs by their local ancestry backgrounds
 
-See `examples.ipynb` for how to run these scripts and expected outputs. 
-
 ## Installation
 
 To run the scripts, 
@@ -92,13 +90,14 @@ julia local_ancestry_concordance.jl --truth file1 --impt file2 --msp file3 --out
 ```
 
 Required arguments:
-+ `--truth`: Full file path to the ground truth genotypes (must end in .vcf or .vcf.gz)
-+ `--impt`: Full file path to the imputed genotypes (must end in .vcf or .vcf.gz)
-+ `--msp`: Full file path to the .msp.tsv file (output of rfmix2) 
-+ `--out`: Full file path to output file name (no extensions). Each ancestry will output a separate dataframe including the concordances for each SNP. 
++ `--truth`: Full file path to the ground truth genotypes (must end in .vcf or .vcf.gz), or a file containing a list of VCF files
++ `--impt`: Full file path to the imputed genotypes (must end in .vcf or .vcf.gz), or a file containing a list of VCF files
++ `--msp`: Full file path to the .msp.tsv file (output of rfmix2), or a file containing a list of VCF files
++ `--out`: Full file path to output file name (no extensions). 
 
 Optional arguments include:
 + `--summary`: An optional which allows users to NOT consider certain SNPs that exist in ground truth or imputed genotype files. Must be a full file path to a comma or tab separated summary file (header must include at least 5 columns with the names CHR/POS/REF/ALT/isImputed) The scripts are set up so that only SNPs listed as `true` in the `isImputed` column will be considered. 
++ `--maf-bins`: Comma-separated list of minor allele frequencies used to bin SNPs. Defaults to `0.0,0.0005,0.001,0.005,0.01,0.02,0.03,0.04,0.05,0.1,0.2,0.3,0.4,0.5`
 
 ## Aggregate R2 based on different local ancestry backgrounds
 
