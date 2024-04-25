@@ -8,8 +8,6 @@ We used a few metrics for evaluating GLIMPSE's imputation accuracy:
 3. Aggregate R2 (squared Pearson's correlation)
 4. Aggregate R2 but stratifying SNPs by their local ancestry backgrounds
 
-See `examples.ipynb` for how to run these scripts and expected outputs. 
-
 ## Installation
 
 To run the scripts, 
