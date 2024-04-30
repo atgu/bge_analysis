@@ -41,5 +41,5 @@ The MAF file should be space-delimited with 5 columns: CHR, POS, REF, ALT, and A
 `bcftools +fill-tags dedup.bcf -Ob -o out.bcf`
 `bcftools query -f '%CHROM %POS %REF %ALT %AF\n' out.bcf > <GSA_allele_freqs.txt>`
 
-For ~150 individuals and ~400k SNPs, the script takes about ~30min to run locally. 
+For ~150 individuals and ~400k SNPs, the script takes about ~3min to run locally. 
 
