@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
 import time
 
-
 start_time = time.time()
 
 def get_truth_gt(column):
@@ -95,7 +94,7 @@ def compute_metrics(df_imputed, df_true):
             precision.append(None)
             concordance.append(None)
             continue
-
+        
         true_positives = np.sum((alleles_imputed == alleles_true) & (alleles_imputed != 0))
         false_positives = np.sum((alleles_imputed != alleles_true) & (alleles_imputed != 0))
         false_negatives = np.sum((alleles_imputed == 0) & (alleles_true != 0))
@@ -113,26 +112,48 @@ def compute_metrics(df_imputed, df_true):
     return sensitivity, precision, concordance
 
 
-def get_aggregate_R2_generator(geno_df, imp_df, maf_bins=None):
+def get_aggregate_R2(geno_df, imp_df, maf_bins=None):
+
     if maf_bins is None:
-        maf_bins = np.linspace(0, 0.5, num=100)
+        maf_bins = list(np.linspace(0,0.5,num=100))
+
+    R2 = []
+    nsnps = []
+    maf_category = []
+
+    true_values = []
+    imputed_values = []
 
     for i in range(1, len(maf_bins)):
-        bin_low, bin_high = maf_bins[i - 1], maf_bins[i]
-        maf_cat = f"{bin_low}-{bin_high}"
-
+        # find SNPs in current bin                                                                                                                                    
+        bin_low, bin_high = maf_bins[i-1], maf_bins[i]
         idx = np.where((bin_low <= maf_df['MAF']) & (maf_df['MAF'] < bin_high))[0]
+        maf_cat = str(bin_low) + "-" + str(bin_high)
+        maf_category.append(maf_cat)
+
         if len(idx) == 0:
             print(f"maf_bin [{bin_low}, {bin_high}] has no SNP! Assigning R2 of NaN")
-            yield np.nan, 0, maf_cat
+            R2.append(np.nan)
+            nsnps.append(0)
+            true_values.append([])
+            imputed_values.append([])
             continue
 
+        # compute squared pearson correlation                                                                                                                         
         truth = np.ravel(geno_df.iloc[idx,])
         imptd = np.ravel(imp_df.iloc[idx,])
 
         non_missing_idx = np.intersect1d(np.where(~np.isnan(truth))[0], np.where(~np.isnan(imptd))[0])
+
         my_R2 = pearsonr(truth[non_missing_idx], imptd[non_missing_idx])[0] ** 2
-        yield my_R2, len(idx), maf_cat, truth[non_missing_idx], imptd[non_missing_idx]
+        R2.append(my_R2)
+        nsnps.append(len(idx))
+
+        true_values.append(truth[non_missing_idx].tolist())
+        imputed_values.append(imptd[non_missing_idx].tolist())
+
+    return R2, nsnps, maf_category, true_values, imputed_values
+
 
 #get necessary inputs from command line
 imputed_filename=sys.argv[1]
@@ -264,6 +285,10 @@ gsa_fixed = gsa_fixed.reindex(columns=samples)
 imputed_gt_fixed = imputed_gt_fixed.reindex(columns=samples)
 imputed_ds_fixed = imputed_ds_fixed.reindex(columns=samples)
 
+gsa_fixed = gsa_fixed.sort_index()
+imputed_gt_fixed = imputed_gt_fixed.sort_index()
+imputed_ds_fixed = imputed_gt_fixed.sort_index()
+maf_df = maf_df.sort_index()
 
 ########## compute non-ref concordance ############
 print("Computing non-reference concordance ... \n")
@@ -277,8 +302,7 @@ df_metrics.to_csv(df_metrics_fname,index=False)
 print(f"Per-SNP non-reference concordance CSV written to {df_metrics_fname}\n")
 
 df_metrics['MAF_bin'] = pd.cut(df_metrics['MAF'], maf_bins)
-df_filtered = df_metrics[df_metrics['Non-Ref Concordance'].notna()]
-df_binned = df_filtered.groupby('MAF_bin').agg({
+df_binned = df_metrics.groupby('MAF_bin').agg({
     'Non-Ref Concordance': 'mean',
     'SNP': 'count'}).reset_index()
 
@@ -290,21 +314,19 @@ print(f"Binned non-reference concordance CSV written to {df_binned_fname}\n")
 
 
 ########### compute aggregate R2 ############
-print("Computing aggregated R2...\n")
-r2_list, nsnps_list, maf_list, true_list, imptd_list = zip(*get_aggregate_R2_generator(gsa_fixed, imputed_ds_fixed))
-print("Computed aggregated R2\n")
-aggregation_df = pd.DataFrame({'maf_category': maf_list, 'number_of_snps': nsnps_list, 'R2': r2_list})
-gt_lists = pd.DataFrame(list(zip(maf_list,true_list, imptd_list)), columns=['MAF', 'True_list','Imputed_list'])
-gt_list_name = cohort_name + "_genotypes_per_MAFbin_table.tsv"
-gt_lists.to_csv(gt_list_name,index=False,sep="\t")
 
+
+r2, nsnps, maf, true_gt_list, impted_gt_list = get_aggregate_R2(gsa_fixed,imputed_ds_fixed)
+aggregation_df = pd.DataFrame(list(zip(maf, nsnps, r2)), columns=['maf_category', 'number_of_snps', 'R2'])
+gt_lists = pd.DataFrame(list(zip(maf,true_gt_list, impted_gt_list)), columns=['MAF', 'True_list','Imputed_list'])
 
 agg_df_name = cohort_name + "_aggregation_R2_table.csv"
 aggregation_df.to_csv(agg_df_name,index=False)
-print(f"Aggregated R2 CSV written to {agg_df_name}\n")
+
+gt_list_name = cohort_name + "_genotypes_per_MAFbin_table.tsv.zip"
+gt_lists.to_csv(gt_list_name,index=False,sep="\t",compression='zip')
 
 end_time = time.time()  # Record the end time
 execution_time = end_time - start_time  # Calculate the execution time#
 print(f"Execution time: {execution_time} seconds")
 print("Script completed! Exiting.\n")
-
