@@ -36,10 +36,14 @@ Run the script via:
 
 The MAF file should be space-delimited with 5 columns: CHR, POS, REF, ALT, and AF (we convert to MAF from AF in the python script itself). We generated this file with the following bcftools commands:
 
-`bcftools norm -d all -o dedup.bcf <GSA.vcf> `
+`bcftools norm -d all -o dedup.bcf <GSA.vcf>`
+
 `bcftools index dedup.bcf`
+
 `bcftools +fill-tags dedup.bcf -Ob -o out.bcf`
+
 `bcftools query -f '%CHROM %POS %REF %ALT %AF\n' out.bcf > <GSA_allele_freqs.txt>`
+
 
 For ~150 individuals and ~400k SNPs, the script takes about ~3min to run locally. 
 
