@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
 import time
 
+
 start_time = time.time()
 
 def get_truth_gt(column):
@@ -52,6 +53,7 @@ def calculate_maf(allele_freq):
     else:
         return 1 - allele_freq
 
+
 def flip_genotypes(genotype_df, reference_df, samples):
     # Merge genotype_df with reference_df on CHROM and POS
     merged_df = pd.merge(genotype_df, reference_df, on=['CHROM', 'POS'], suffixes=('_genotype', '_reference'))
@@ -67,6 +69,7 @@ def flip_genotypes(genotype_df, reference_df, samples):
         genotype_df.loc[flipped_mask, sample_id] = 2 - genotype_df.loc[flipped_mask, sample_id]
     
     return genotype_df
+
 
 def compute_metrics(df_imputed, df_true):
     sensitivity = []
@@ -92,7 +95,7 @@ def compute_metrics(df_imputed, df_true):
             precision.append(None)
             concordance.append(None)
             continue
-
+        
         true_positives = np.sum((alleles_imputed == alleles_true) & (alleles_imputed != 0))
         false_positives = np.sum((alleles_imputed != alleles_true) & (alleles_imputed != 0))
         false_negatives = np.sum((alleles_imputed == 0) & (alleles_true != 0))
@@ -108,6 +111,7 @@ def compute_metrics(df_imputed, df_true):
         concordance.append(concordance_snp)
 
     return sensitivity, precision, concordance
+
 
 def get_aggregate_R2_generator(geno_df, imp_df, maf_bins=None):
     if maf_bins is None:
@@ -129,7 +133,7 @@ def get_aggregate_R2_generator(geno_df, imp_df, maf_bins=None):
         non_missing_idx = np.intersect1d(np.where(~np.isnan(truth))[0], np.where(~np.isnan(imptd))[0])
         my_R2 = pearsonr(truth[non_missing_idx], imptd[non_missing_idx])[0] ** 2
         yield my_R2, len(idx), maf_cat
-        
+
 #get necessary inputs from command line
 imputed_filename=sys.argv[1]
 gsa_filename=sys.argv[2]
@@ -161,6 +165,7 @@ print("Successfully loaded imputed VCF file\n")
 gsa_snps = df_gsa['CHROM'].astype(str) + ':' + df_gsa['POS'].astype(str) + ':' + df_gsa['REF'].astype(str) + ':' + df_gsa['ALT'].astype(str)
 gsa_snps_flip =  df_gsa['CHROM'].astype(str) + ':' + df_gsa['POS'].astype(str) + ':' + df_gsa['ALT'].astype(str) + ':' + df_gsa['REF'].astype(str)
 gsa_snps = pd.concat([gsa_snps, gsa_snps_flip], axis=0)
+
 
 imputed_snps = (df_imputed['CHROM']) + ':' + (df_imputed['POS']).astype(str)  + ':' + df_imputed['REF'].astype(str) + ':' + df_imputed['ALT'].astype(str)
 imputed_snps_flip = (df_imputed['CHROM']) + ':' + (df_imputed['POS']).astype(str)  + ':' + df_imputed['ALT'].astype(str) + ':' + df_imputed['REF'].astype(str)
@@ -259,6 +264,11 @@ gsa_fixed = gsa_fixed.reindex(columns=samples)
 imputed_gt_fixed = imputed_gt_fixed.reindex(columns=samples)
 imputed_ds_fixed = imputed_ds_fixed.reindex(columns=samples)
 
+#make sure SNPs are in the same order
+gsa_fixed = gsa_fixed.sort_index()
+imputed_gt_fixed = imputed_gt_fixed.sort_index()
+imputed_ds_fixed = imputed_ds_fixed.sort_index()
+maf_df = maf_df.sort_index()
 
 ########## compute non-ref concordance ############
 print("Computing non-reference concordance ... \n")
