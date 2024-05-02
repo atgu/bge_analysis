@@ -13,7 +13,7 @@ Four command-line arguments are required:
 
 Run the script via:
 
-`python gsa_concordance_wflipping.py <imputed.vcf> <gsa.vcf> <maf.txt> <cohort>`
+`python gsa_concordance.py <imputed.vcf> <gsa.vcf> <maf.txt> <cohort>`
 
 *Note for VCF files, in order for pandas to read in the column headers for the dataframe, the “#CHROM” needs to be edited to just “CHROM”, since any lines that begin with “#” are considered comments and ignored. The following are the bcftools commands we ran to format the imputed NeuroGAP data: 
 
