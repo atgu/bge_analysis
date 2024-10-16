@@ -3,6 +3,8 @@
 sst="gs://neurogap-bge-imputed-regional/forPRSWiki/formatted_PGC3_SCZ.txt"
 N=170114
 
+#the LD reference was downloaded from the PRS-CS github repo, see here: https://github.com/getian107/PRScs
+#specifically the AFR 1KG reference panel: ldblk_1kg_afr.tar.gz
 refdir="gs://neurogap-bge-imputed-regional/prscs/ldblk_1kg_afr"
 
 for chrom in range(1, 23):
