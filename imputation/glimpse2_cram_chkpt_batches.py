@@ -89,11 +89,6 @@ if __name__ == '__main__':
         for n in range(1, 23):
             
             mem_type="standard" #if any CHR fails due to "Out of Memory", change this to "highmem"
-            
-            # a reference panel of haplotypes (only bi-allelic snps)                                                    
-            bcf_path = f'gs://bge-regional/bge/reference_panel/hgdp.tgp.trio/mac_cutoff/mac_2/hgdp.tgp.onlysnps.chr{n}.mac2.vcf.gz'
-            ref_bcf = b.read_input_group(**{'vcf.gz': bcf_path,
-                                        'vcf.gz.csi': f'{bcf_path}.csi'})
 
             # a fine-scale genetic map - b38                                                                                               
             genetic_map = b.read_input(f'gs://hgdp-1kg/phasing/maps/b38/chr{n}.b38.gmap.gz')
