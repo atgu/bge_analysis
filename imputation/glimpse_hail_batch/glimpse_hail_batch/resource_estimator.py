@@ -10,13 +10,6 @@ from .globals import find_chunks
 ChunkStats = namedtuple('ChunkStats', ['batch_size', 'mean_est_cpu', 'max_est_cpu', 'min_est_cpu', 'mean_est_memory', 'max_est_memory', 'min_est_memory'])
 
 
-def compute_cost(est_cpu, runtime_mins: int):
-    total_cost = 0
-    for result in est_cpu:
-        total_cost += 0.03 * (runtime_mins / 60) * 2 ** math.ceil(math.log2(result))
-    return total_cost
-
-
 def estimate_resources(args: dict):
     chunks = find_chunks(args['split_reference_dir'])
     chunk_sizes = [chunk.n_rare + chunk.n_common for chunk in chunks]

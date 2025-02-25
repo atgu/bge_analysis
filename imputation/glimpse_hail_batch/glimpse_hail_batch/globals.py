@@ -81,16 +81,13 @@ def find_chunks(split_reference_output_dir: str,
     return chunks
 
 
-BUCKET_REGEX = re.compile('gs://(?P<bucket>.*)/(?P<file_path>.*)')
-
 def get_bucket(path: str):
     return path.split('/')[2]
-    #return BUCKET_REGEX.fullmatch(path).groupdict()['bucket']
 
 
 def rewrite_path(mount_path: str, path: str):
     assert mount_path.endswith('/')
-    file_path = '/'.join(path.split('/')[3:]) #BUCKET_REGEX.fullmatch(path).groupdict()['file_path']
+    file_path = '/'.join(path.split('/')[3:])
     return f'{mount_path}{file_path}'
 
 

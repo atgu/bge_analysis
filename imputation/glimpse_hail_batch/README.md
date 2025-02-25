@@ -27,7 +27,7 @@ The Hail Batch implemented in this repo is almost identical to that written in t
 
 ## Considerations
 
-All CRAM files being read either in the Terra Data Repository or a bucket managed outside the Terra Data Repository must be in a **Regional** bucket. The temporary buckets used for both Batch temporary files and the staging remote temporary directory should be located in a **Regional** bucket in the same region as the CRAMs bucket(s). Lastly, the region specified to use with Batch `--batch-regions` must also be in the same region as the storage buckets. For example, to be clear, the following six items must be in the same region such as `us-central`:
+All CRAM files being read either in the Terra Data Repository or a bucket managed outside the Terra Data Repository must be in a **Regional** bucket. The temporary buckets used for both Batch temporary files and the staging remote temporary directory should be located in a **Regional** bucket in the same region as the CRAMs bucket(s). Lastly, the region specified to use with Batch `--batch-regions` must also be in the same region as the storage buckets. For example, to be clear, the following six items must be in the same region such as `us-central1`:
 
 1. CRAM and CRAM index files bucket
 2. Batch remote temporary directory `--batch-remote-tmpdir`
