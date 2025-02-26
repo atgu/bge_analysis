@@ -213,7 +213,9 @@ def merge_vcfs(b: hb.Batch,
                cpu: int,
                memory: str,
                storage: str,
-               use_checkpoint: bool) -> Optional[Job]:
+               use_checkpoint: bool,
+               n_partitions: int,
+               intervals_dill_file: str) -> Optional[Job]:
     if use_checkpoint and hfs.exists(output_path):
         return None
 
@@ -227,12 +229,23 @@ def merge_vcfs(b: hb.Batch,
     j.command(f'''
 python3 << EOF
 import hail as hl
+import hailtop.fs as hfs
+import dill
+
 hl.init(backend="spark", local="local[{cpu}]", default_reference="GRCh38", tmp_dir="/io/", local_tmpdir="/io/")
+
 mt = hl.import_vcf("{file_path_regex}")
 mt = mt.annotate_rows(info=mt.info.annotate(N={len(sample_group.samples)}, AF=mt.info.AF[0], INFO=mt.info.INFO[0], RAF=mt.info.RAF[0]))
 mt.write("{output_path}", overwrite=True)
-EOF    
+
+intervals = mt._calculate_new_partitions({n_partitions})
+
+with hfs.open("{j.intervals}", 'wb') as f:
+    dill.dump(intervals, f)
+EOF
 ''')
+
+    b.write_output(j.intervals, intervals_dill_file)
 
     return j
 
@@ -264,7 +277,8 @@ def union_sample_groups(b: hb.Batch,
                         billing_project: str,
                         remote_tmpdir: str,
                         regions: str,
-                        use_checkpoints: bool) -> Optional[Job]:
+                        use_checkpoints: bool,
+                        intervals_dill_file: str) -> Optional[Job]:
     if use_checkpoints and hfs.exists(output_path):
         return None
 
@@ -281,21 +295,28 @@ hailctl config set batch/regions "{','.join(regions)}"
 
 python3 << EOF
 import hail as hl
+import hailtop.fs as hfs
 import os
+import dill
 from typing import List
 
 hl.init(backend='batch', app_name='{batch_name}-union-sample-groups', driver_cores=16, worker_cores=2)
+
+intervals = None
+if hfs.exists("{intervals_dill_file}"):
+    with hfs.open("{intervals_dill_file}", "rb") as f:
+        intervals = dill.load(f)
 
 paths = []
 with open("{mt_paths}", 'r') as f:
     for line in f:
         paths.append(line.rstrip("\\n"))
 
-mt_left = hl.read_matrix_table(paths[0])
+mt_left = hl.read_matrix_table(paths[0], _intervals=intervals)
 mt_left = mt_left.annotate_rows(**{{"info_0": mt_left.info}})
 
 for path in paths[1:]:
-    mt_right = hl.read_matrix_table(path)
+    mt_right = hl.read_matrix_table(path, _intervals=intervals)
     mt_left = mt_left.union_cols(mt_right,
                                  drop_right_row_fields=False,
                                  row_join_type='outer')

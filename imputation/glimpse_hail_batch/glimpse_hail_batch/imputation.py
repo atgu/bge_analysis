@@ -20,7 +20,8 @@ def run_sample_group(b: hb.Batch,
                      sample_group: SampleGroup,
                      fasta_input: hb.ResourceGroup,
                      ref_dict: hb.ResourceFile,
-                     samples_per_copy_group: int) -> Optional[hb.Job]:
+                     samples_per_copy_group: int,
+                     intervals_dill_file: str) -> Optional[hb.Job]:
     sample_group.write_sample_group_dict()
 
     skip_copy_crams = False
@@ -55,7 +56,10 @@ def run_sample_group(b: hb.Batch,
 
     phase_jobs = []
     phased_output_files = sample_group.get_phased_output_file_names(contig_chunks)
+
     n_variants_contig = {contig: sum(chunk.n_variants for chunk in chunks) for contig, chunks in contig_chunks.items()}
+
+    n_chunks = len(chunk for contig, chunks in contig_chunks.items() for chunk in chunks)
 
     if not skip_phasing:
         crams_list = sample_group.write_cram_list()
@@ -125,7 +129,9 @@ def run_sample_group(b: hb.Batch,
                              args['merge_vcf_cpu'],
                              args['merge_vcf_memory'],
                              args['merge_vcf_storage'],
-                             args['use_checkpoints'])
+                             args['use_checkpoints'],
+                             n_partitions=n_chunks,
+                             intervals_dill_file=intervals_dill_file)
         if merge_j is not None:
             merge_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs))
             merge_vcf_jobs.append(merge_j)
@@ -146,6 +152,9 @@ def run_sample_group(b: hb.Batch,
 
 
 def impute(args: dict):
+    if hfs.exists(args['output_file']):
+        raise Exception(f'output file {args["output_file"]} already exists.')
+
     batch_regions = args['batch_regions']
     if batch_regions is not None:
         batch_regions = batch_regions.split(',')
@@ -188,9 +197,18 @@ def impute(args: dict):
     fasta_input = b.read_input_group(**{'fasta': args['fasta'], 'fasta.fai': f'{args["fasta"]}.fai'})
     ref_dict = b.read_input(args['ligate_ref_dict'])
 
+    intervals_dill_file = args['staging_remote_tmpdir'].rstrip('/') + '/intervals.json'
+
     success_jobs = []
     for sample_group in sample_groups:
-        success_j = run_sample_group(b, args, contig_chunks, sample_group, fasta_input, ref_dict, args['samples_per_copy_group'])
+        success_j = run_sample_group(b,
+                                     args,
+                                     contig_chunks,
+                                     sample_group,
+                                     fasta_input,
+                                     ref_dict,
+                                     args['samples_per_copy_group'],
+                                     intervals_dill_file)
         if success_j is not None:
             success_jobs.append(success_j)
 
@@ -211,7 +229,8 @@ def impute(args: dict):
                                   args['billing_project'],
                                   args['batch_remote_tmpdir'],
                                   batch_regions,
-                                  args['use_checkpoints'])
+                                  args['use_checkpoints'],
+                                  intervals_dill_file)
     if union_j is not None:
         union_j.depends_on(*success_jobs)
 
