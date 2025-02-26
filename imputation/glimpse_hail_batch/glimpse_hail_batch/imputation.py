@@ -1,6 +1,7 @@
 import argparse
 from collections import defaultdict
 import json
+import re
 
 import hailtop.batch as hb
 import hailtop.fs as hfs
@@ -59,7 +60,7 @@ def run_sample_group(b: hb.Batch,
 
     n_variants_contig = {contig: sum(chunk.n_variants for chunk in chunks) for contig, chunks in contig_chunks.items()}
 
-    n_chunks = len(chunk for contig, chunks in contig_chunks.items() for chunk in chunks)
+    n_chunks = len([chunk for contig, chunks in contig_chunks.items() for chunk in chunks])
 
     if not skip_phasing:
         crams_list = sample_group.write_cram_list()
@@ -163,12 +164,13 @@ def impute(args: dict):
 
     backend = hb.ServiceBackend(billing_project=args['billing_project'],
                                 remote_tmpdir=args['batch_remote_tmpdir'],
-                                regions=batch_regions)
+                                regions=batch_regions,
+                                gcs_requester_pays_configuration=args['gcs_requester_pays_configuration'])
 
     if args['batch_id'] is not None:
-        b = hb.Batch.from_batch_id(args['batch_id'], backend=backend)
+        b = hb.Batch.from_batch_id(args['batch_id'], backend=backend, requester_pays_project=args['gcs_requester_pays_configuration'])
     else:
-        b = hb.Batch(name=batch_name, backend=backend)
+        b = hb.Batch(name=batch_name, backend=backend, requester_pays_project=args['gcs_requester_pays_configuration'])
 
     mount_point = '/crams/'
 
@@ -186,9 +188,12 @@ def impute(args: dict):
         sample_groups = [sg for sg in sample_groups if sg.sample_group_index == args['sample_group_index']]
         assert sample_groups
 
-    chunks = find_chunks(args['split_reference_dir'],
+    chunks = find_chunks(args['reference_dir'],
+                         args['chunk_info_dir'],
+                         re.compile(args['binary_reference_file_regex']),
                          requested_contig=args['contig'],
-                         requested_chunk_index=args['chunk_index'])
+                         requested_chunk_index=args['chunk_index'],
+                         requester_pays_config=args['gcs_requester_pays_configuration'])
 
     contig_chunks = defaultdict(list)
     for chunk in chunks:
@@ -253,7 +258,9 @@ if __name__ == '__main__':
     parser.add_argument('--docker-glimpse', type=str, required=True)
     parser.add_argument('--docker-hail', type=str, required=True)
 
-    parser.add_argument("--split-reference-dir", type=str, required=True)
+    parser.add_argument("--reference-dir", type=str, required=True)
+    parser.add_argument("--chunk-info-dir", type=str, required=True)
+    parser.add_argument('--binary-reference-file-regex', type=str, required=True)
 
     parser.add_argument('--sample-manifest', type=str, required=True)
     parser.add_argument('--sample-id-col', type=str, required=True)
@@ -297,6 +304,8 @@ if __name__ == '__main__':
     parser.add_argument('--merge-vcf-cpu', type=int, required=True)
     parser.add_argument('--merge-vcf-memory', type=str, required=False, default='standard')
     parser.add_argument('--merge-vcf-storage', type=str, required=False, default='30Gi')
+
+    parser.add_argument('--gcs-requester-pays-configuration', type=str, required=False)
 
     args = vars(parser.parse_args())
 

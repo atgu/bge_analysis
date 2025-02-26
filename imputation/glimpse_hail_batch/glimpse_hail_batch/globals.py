@@ -33,42 +33,60 @@ def reference_file_str() -> str:
     return f'ref_chunk_${{CONTIG}}_${{CHUNKINDEX}}'
 
 
-def parse_reference_chunk_path(path: str) -> Tuple[str, int]:
-    segments = path.split('_')
+def parse_binary_reference_path(path: str) -> Tuple[str, int]:
+    ext = '.bin'
+    file = os.path.basename(path)
+    segments = file.replace(ext, '').split('_')
     contig = '_'.join(segments[2:-1])
     chunk_index = int(segments[-1])
     return (contig, chunk_index)
 
 
+def parse_chunk_path(path: str) -> str:
+    ext = '.txt'
+    file = os.path.basename(path)
+    segments = file.replace(ext, '').split('_')
+    contig = '_'.join(segments[1:])
+    return contig
+
+
 chunk_manifest_header = ['chunk_idx', 'contig', 'buffered_region', 'actual_region', 'cm_dummy', 'mb_dummy', 'n_variants', 'n_common']
 
 
-def find_chunks(split_reference_output_dir: str,
+def find_chunks(reference_dir: Optional[str],
+                chunk_info_dir: Optional[str],
+                binary_reference_file_regex: re.Pattern,
                 *,
                 requested_contig: Optional[str] = None,
-                requested_chunk_index: Optional[int] = None) -> List[Chunk]:
+                requested_chunk_index: Optional[int] = None,
+                requester_pays_config: Optional[str] = None
+                ) -> List[Chunk]:
     chunks = []
-    chunk_info_dir = chunk_info_file_dir_str(split_reference_output_dir)
-    reference_dir = reference_file_dir_str(split_reference_output_dir)
 
-    reference_files = hfs.ls(reference_dir)
-    chunk_info_files = hfs.ls(chunk_info_dir)
+    reference_files = hfs.ls(reference_dir, requester_pays_config=requester_pays_config)
+    chunk_info_files = hfs.ls(chunk_info_dir, requester_pays_config=requester_pays_config)
 
     reference_paths = {}
     for file in reference_files:
-        contig, chunk_index = parse_reference_chunk_path(file.path[len(reference_dir):])
+        match = binary_reference_file_regex.fullmatch(os.path.basename(file.path)).groupdict()
+        contig = match['contig']
+        chunk_index = int(match['chunk_index'])
         reference_paths[(contig, chunk_index)] = file.path
 
     for chunk_info_file in chunk_info_files:
-        with hfs.open(chunk_info_file.path, 'r') as f:
+        contig = parse_chunk_path(chunk_info_file.path)
+
+        with hfs.open(chunk_info_file.path, 'r', requester_pays_config=requester_pays_config) as f:
             chunks_df = pd.read_csv(io.StringIO(f.read()), sep="\t", names=chunk_manifest_header)
+
+        # Note: the contig in the file name can be different than the actual contig in the chunks file!
         for _, row in chunks_df.iterrows():
             chunks.append(Chunk(contig=row['contig'],
                                 chunk_idx=int(row['chunk_idx']),
                                 n_common=row['n_common'],
                                 n_rare=row['n_variants'] - row['n_common'],
                                 info_path=chunk_info_file.path,
-                                path=reference_paths[(row['contig'], int(row['chunk_idx']))],
+                                path=reference_paths[(contig, row['chunk_idx'])],
                                 n_variants=row['n_variants']))
 
     chunks.sort(key=lambda c: c.chunk_idx)

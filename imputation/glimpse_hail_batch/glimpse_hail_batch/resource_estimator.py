@@ -3,6 +3,7 @@ from collections import namedtuple
 from tabulate import tabulate
 import statistics
 import math
+import re
 
 from .globals import find_chunks
 
@@ -11,7 +12,12 @@ ChunkStats = namedtuple('ChunkStats', ['batch_size', 'mean_est_cpu', 'max_est_cp
 
 
 def estimate_resources(args: dict):
-    chunks = find_chunks(args['split_reference_dir'])
+    chunks = find_chunks(args['reference_dir'],
+                         args['chunk_info_dir'],
+                         re.compile(args['binary_reference_file_regex']),
+                         requester_pays_config=args['gcs_requester_pays_configuration'])
+
+    chunks = [chunk for chunk in chunks]
     chunk_sizes = [chunk.n_rare + chunk.n_common for chunk in chunks]
 
     mean_chunk_size = statistics.mean(chunk_sizes)
@@ -45,19 +51,16 @@ def estimate_resources(args: dict):
 if __name__ == '__main__':
     p = ArgumentParser()
 
-    p.add_argument("--split-reference-dir", type=str, required=True)
+    p.add_argument("--reference-dir", type=str, required=True)
+    p.add_argument("--chunk-info-dir", type=str, required=True)
+    p.add_argument('--binary-reference-file-regex', type=str, required=True)
+
     p.add_argument('--max-runtime-mins', type=int, required=True)
     p.add_argument('--target-runtime-mins', type=int, required=True)
     p.add_argument('--n-samples', type=int, required=True)
 
+    p.add_argument('--gcs-requester-pays-configuration', type=str, required=False)
+
     args = p.parse_args()
-
-    batch_regions = args.batch_regions
-    if batch_regions:
-        batch_regions = args.batch_regions.split(',')
-
-    bucket_allow_list = args.gcs_bucket_allow_list
-    if bucket_allow_list:
-        bucket_allow_list = bucket_allow_list.split(',')
 
     estimate_resources(vars(args))

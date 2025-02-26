@@ -300,7 +300,7 @@ import os
 import dill
 from typing import List
 
-hl.init(backend='batch', app_name='{batch_name}-union-sample-groups', driver_cores=16, worker_cores=2)
+hl.init(backend='batch', app_name='{batch_name}-union-sample-groups', driver_cores=8, worker_cores=2)
 
 intervals = None
 if hfs.exists("{intervals_dill_file}"):
