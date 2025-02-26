@@ -16,27 +16,27 @@ Chunk = namedtuple('Chunk', ['contig', 'chunk_idx', 'n_common', 'n_rare', 'info_
 
 def reference_file_dir_str(output_dir: str) -> str:
     output_dir = output_dir.rstrip('/')
-    return f'{output_dir}/reference_data/'
+    return f'{output_dir}/binary_reference/'
 
 
 def chunk_info_file_dir_str(output_dir: str) -> str:
     output_dir = output_dir.rstrip('/')
-    return f'{output_dir}/chunk_info/'
+    return f'{output_dir}/chunks/'
 
 
-def chunks_file_str(chunks_dir: str, contig_index: Union[str, int]) -> str:
+def chunks_file_str(chunks_dir: str, contig: str) -> str:
     chunks_dir = chunks_dir.rstrip('/')
-    return f'{chunks_dir}/chunks_contigindex_{contig_index}.txt'
+    return f'{chunks_dir}/chunks_{contig}.txt'
 
 
 def reference_file_str() -> str:
-    return f'reference_panel_${{CONTIG}}_${{CHUNKINDEX}}'
+    return f'ref_chunk_${{CONTIG}}_${{CHUNKINDEX}}'
 
 
 def parse_reference_chunk_path(path: str) -> Tuple[str, int]:
     segments = path.split('_')
-    contig = segments[2]
-    chunk_index = int(segments[3])
+    contig = '_'.join(segments[2:-1])
+    chunk_index = int(segments[-1])
     return (contig, chunk_index)
 
 

@@ -8,7 +8,7 @@ import hailtop.fs as hfs
 from typing import Dict, List, Optional
 
 from .imputation_jobs import (
-    combine_coverage_metrics, copy_temp_crams_job, delete_temp_files_job,
+    copy_temp_crams_job, delete_temp_files_job,
     ligate, merge_vcfs, phase, union_sample_groups, write_success
 )
 from .globals import Chunk, SampleGroup, find_crams, find_chunks, get_ligate_storage_requirement, split_samples_into_groups

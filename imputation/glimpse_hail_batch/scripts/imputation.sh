@@ -2,7 +2,7 @@
 
 BILLING_PROJECT="neale-pumas-bge"
 REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/test-glimpse/batch/"
-SPLIT_REFERENCE_PANEL_OUTPUT_DIR="gs://jigold-batch-tmp-ezxyx/split-hgdp-reference/"
+SPLIT_REFERENCE_PANEL_OUTPUT_DIR="gs://bge-dragen-imputation/hgdp1kg/"
 SAMPLE_MANIFEST="/Users/jigold/Downloads/sample_700.tsv"
 STAGING_REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/glimpse-staging-cohort1/"
 FASTA="gs://jigold-batch-tmp-ezxyx/fasta/Homo_sapiens_assembly38.fasta"
@@ -23,13 +23,15 @@ python3 -m glimpse_hail_batch.imputation \
     --sample-group-size 175 \
     --phase-cpu 4 \
     --phase-memory "standard" \
-    --ligate-cpu 8 \
+    --ligate-cpu 4 \
     --ligate-memory "standard" \
-    --merge-vcf-cpu 8 \
+    --merge-vcf-cpu 4 \
     --merge-vcf-storage "20Gi" \
     --sample-manifest $SAMPLE_MANIFEST \
     --sample-id-col "collaborator_sample_id" \
     --cram-path-col "genome_cram_path" \
     --cram-index-path-col "genome_crai_path" \
     --output-file $OUTPUT_FILE \
-    --save-checkpoints
+    --save-checkpoints \
+    --contig "chr22" \
+    --n-samples 10

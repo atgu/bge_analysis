@@ -68,7 +68,7 @@ def split_reference_job(b: hb.Batch,
 
     split_reference_dir = reference_file_dir_str(split_reference_output_dir)
     chunks_dir = chunk_info_file_dir_str(split_reference_output_dir)
-    chunks_file = chunks_file_str(chunks_dir, contig_index)
+    chunks_file = chunks_file_str(chunks_dir, contig)
 
     j = b.new_job(name=f'split-reference-{contig_index}-{contig}',
                   attributes={'contig-index': str(contig_index),
