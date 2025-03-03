@@ -27,6 +27,7 @@ def copy_temp_crams_job(b: hb.Batch, sample_group: SampleGroup, start: int, end:
 
 def phase(b: hb.Batch,
           output_file: str,
+          phase_file_exists: bool,
           sample_group: SampleGroup,
           chunk: Chunk,
           cram_remote_tmp_path: str,
@@ -47,7 +48,7 @@ def phase(b: hb.Batch,
 
     glimpse_checkpoint_file_input = b.read_input(glimpse_remote_checkpoint_file)
 
-    if use_checkpoint and hfs.exists(output_file + '.bcf'):
+    if use_checkpoint and phase_file_exists:
        return None
 
     j = b.new_bash_job(name=f'phase/sample-group-{sample_group_index}/{chunk.contig}/{chunk.chunk_idx}',
@@ -96,10 +97,10 @@ cmd="/bin/GLIMPSE2_phase \
     --threads {cpu} \
     --bam-list {crams_list} \
     --fasta {fasta.fasta} \
-    --checkpoint-file-out checkpoint.bin"
+    --checkpoint-file-out checkpoint.bin {extra_args}"
 
 if [ -s {glimpse_checkpoint_file_input} ]; then
-    cmd="$cmd --checkpoint-file-in {glimpse_checkpoint_file_input} {extra_args}" 
+    cmd="$cmd --checkpoint-file-in {glimpse_checkpoint_file_input}" 
 fi
 
 #check for read error which corresponds exactly to end of cram/bam block.  
@@ -213,11 +214,10 @@ def merge_vcfs(b: hb.Batch,
                cpu: int,
                memory: str,
                storage: str,
-               use_checkpoint: bool,
-               n_partitions: int,
-               intervals_dill_file: str) -> Optional[Job]:
-    if use_checkpoint and hfs.exists(output_path):
-        return None
+               use_checkpoint: bool) -> Optional[Job]:
+    # FIXME: check for success file
+    # if use_checkpoint and hfs.exists(output_path):
+    #     return None
 
     j = b.new_bash_job(attributes={'name': f'merge-vcfs/sample-group-{sample_group.sample_group_index}',
                                    'task': 'merge-vcfs'})
@@ -230,22 +230,16 @@ def merge_vcfs(b: hb.Batch,
 python3 << EOF
 import hail as hl
 import hailtop.fs as hfs
-import dill
 
-hl.init(backend="spark", local="local[{cpu}]", default_reference="GRCh38", tmp_dir="/io/", local_tmpdir="/io/")
+# hl.init(backend="spark", local="local[{cpu}]", default_reference="GRCh38", tmp_dir="/io/", local_tmpdir="/io/")
+hl.init(backend="local", default_reference="GRCh38", tmp_dir="/io/")
 
 mt = hl.import_vcf("{file_path_regex}")
 mt = mt.annotate_rows(info=mt.info.annotate(N={len(sample_group.samples)}, AF=mt.info.AF[0], INFO=mt.info.INFO[0], RAF=mt.info.RAF[0]))
 mt.write("{output_path}", overwrite=True)
-
-intervals = mt._calculate_new_partitions({n_partitions})
-
-with hfs.open("{j.intervals}", 'wb') as f:
-    dill.dump(intervals, f)
 EOF
 ''')
 
-    b.write_output(j.intervals, intervals_dill_file)
 
     return j
 
@@ -278,7 +272,7 @@ def union_sample_groups(b: hb.Batch,
                         remote_tmpdir: str,
                         regions: str,
                         use_checkpoints: bool,
-                        intervals_dill_file: str) -> Optional[Job]:
+                        n_partitions: int) -> Optional[Job]:
     if use_checkpoints and hfs.exists(output_path):
         return None
 
@@ -297,20 +291,17 @@ python3 << EOF
 import hail as hl
 import hailtop.fs as hfs
 import os
-import dill
 from typing import List
 
 hl.init(backend='batch', app_name='{batch_name}-union-sample-groups', driver_cores=8, worker_cores=2)
-
-intervals = None
-if hfs.exists("{intervals_dill_file}"):
-    with hfs.open("{intervals_dill_file}", "rb") as f:
-        intervals = dill.load(f)
 
 paths = []
 with open("{mt_paths}", 'r') as f:
     for line in f:
         paths.append(line.rstrip("\\n"))
+
+mt_init = hl.read_matrix_table(paths[0])
+intervals = mt_init._calculate_new_partitions({n_partitions})
 
 mt_left = hl.read_matrix_table(paths[0], _intervals=intervals)
 mt_left = mt_left.annotate_rows(**{{"info_0": mt_left.info}})
@@ -345,6 +336,8 @@ output_path = "{output_path}"
 
 if output_path.endswith('.mt'):
     mt.write(output_path)
+    mt_count = hl.read_matrix_table(output_path)
+    print(mt_count.count())
 else:
     assert output_path.endswith('.vcf.bgz')
     hl.export_vcf(mt, output_path, tabix=True)

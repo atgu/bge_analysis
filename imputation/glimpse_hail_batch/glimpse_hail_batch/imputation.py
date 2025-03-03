@@ -1,28 +1,35 @@
 import argparse
+import asyncio
 from collections import defaultdict
 import json
 import re
+from functools import partial
 
 import hailtop.batch as hb
 import hailtop.fs as hfs
+from hailtop.aiotools.router_fs import RouterAsyncFS
+from hailtop.utils import bounded_gather
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .imputation_jobs import (
     copy_temp_crams_job, delete_temp_files_job,
     ligate, merge_vcfs, phase, union_sample_groups, write_success
 )
-from .globals import Chunk, SampleGroup, find_crams, find_chunks, get_ligate_storage_requirement, split_samples_into_groups
+from .globals import Chunk, SampleGroup, file_exists, find_crams, find_chunks, get_ligate_storage_requirement, split_samples_into_groups
 
 
-def run_sample_group(b: hb.Batch,
-                     args: dict,
-                     contig_chunks: Dict[str, List[Chunk]],
-                     sample_group: SampleGroup,
-                     fasta_input: hb.ResourceGroup,
-                     ref_dict: hb.ResourceFile,
-                     samples_per_copy_group: int,
-                     intervals_dill_file: str) -> Optional[hb.Job]:
+async def run_sample_group(b: hb.Batch,
+                           args: dict,
+                           contig_chunks: Dict[str, List[Chunk]],
+                           sample_group: SampleGroup,
+                           fasta_input: hb.ResourceGroup,
+                           ref_dict: hb.ResourceFile,
+                           samples_per_copy_group: int,
+                           prev_copy_cram_jobs: List[hb.Job],
+                           fs: RouterAsyncFS) -> Tuple[List[hb.Job], Optional[hb.Job]]:
+    print(f'staging sample group {sample_group.sample_group_index}')
+
     sample_group.write_sample_group_dict()
 
     skip_copy_crams = False
@@ -33,7 +40,7 @@ def run_sample_group(b: hb.Batch,
     ligated_output_files_by_contig = sample_group.get_ligate_output_file_names(contig_chunks)
     if args['use_checkpoints']:
         is_ligate_complete = all([hfs.exists(file + '.vcf.bgz') for contig, file in ligated_output_files_by_contig.items()])
-        is_merge_complete = hfs.is_dir(sample_group.merged_mt_path)
+        is_merge_complete = False # CHeckc for success file hfs.is_dir(sample_group.merged_mt_path)
 
         skip_copy_crams = is_merge_complete or is_ligate_complete
         skip_phasing = is_merge_complete or is_ligate_complete
@@ -53,6 +60,10 @@ def run_sample_group(b: hb.Batch,
                                          idx + samples_per_copy_group,
                                          args['phase_cpu'],
                                          args['phase_memory'])
+
+            # this is really important to make sure that sample groups are copied when there's capacity for phasing jobs
+            copy_j.depends_on(*prev_copy_cram_jobs)
+
             copy_cram_jobs.append(copy_j)
 
     phase_jobs = []
@@ -60,20 +71,31 @@ def run_sample_group(b: hb.Batch,
 
     n_variants_contig = {contig: sum(chunk.n_variants for chunk in chunks) for contig, chunks in contig_chunks.items()}
 
-    n_chunks = len([chunk for contig, chunks in contig_chunks.items() for chunk in chunks])
-
     if not skip_phasing:
         crams_list = sample_group.write_cram_list()
         crams_list_input = b.read_input(crams_list)
 
+        phase_checkpoint_files = await bounded_gather(*[partial(sample_group.initialize_phased_glimpse_checkpoint_file, fs, contig, chunk.chunk_idx)
+                                                        for contig, chunks in contig_chunks.items()
+                                                        for chunk in chunks],
+                                                      cancel_on_error=True)
+
+        already_completed = await bounded_gather(*[partial(file_exists, fs, phased_output_files[contig][chunk.chunk_idx] + '.bcf')
+                                                        for contig, chunks in contig_chunks.items()
+                                                        for chunk in chunks],
+                                                      cancel_on_error=True)
+
+        chunk_idx = 0
         for contig, chunks in contig_chunks.items():
             for chunk in chunks:
                 phased_output_file = phased_output_files[contig][chunk.chunk_idx]
 
-                phase_checkpoint_file = sample_group.initialize_phased_glimpse_checkpoint_file(contig, chunk.chunk_idx)
+                phase_exists = already_completed[chunk_idx]
+                phase_checkpoint_file = phase_checkpoint_files[chunk_idx]
 
                 phase_j = phase(b,
                                 phased_output_file,
+                                phase_exists,
                                 sample_group,
                                 chunk,
                                 sample_group.remote_cram_temp_dir,
@@ -95,6 +117,8 @@ def run_sample_group(b: hb.Batch,
                 if phase_j is not None:
                     phase_j.depends_on(*copy_cram_jobs)
                     phase_jobs.append(phase_j)
+
+                chunk_idx += 1
 
     ligate_jobs = []
     if not skip_ligate:
@@ -130,9 +154,7 @@ def run_sample_group(b: hb.Batch,
                              args['merge_vcf_cpu'],
                              args['merge_vcf_memory'],
                              args['merge_vcf_storage'],
-                             args['use_checkpoints'],
-                             n_partitions=n_chunks,
-                             intervals_dill_file=intervals_dill_file)
+                             args['use_checkpoints'])
         if merge_j is not None:
             merge_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs))
             merge_vcf_jobs.append(merge_j)
@@ -149,12 +171,15 @@ def run_sample_group(b: hb.Batch,
         delete_j.always_run(True)
         delete_jobs.append(delete_j)
 
-    return success_j
+    return (copy_cram_jobs, success_j)
 
 
-def impute(args: dict):
+async def impute(args: dict):
     if hfs.exists(args['output_file']):
         raise Exception(f'output file {args["output_file"]} already exists.')
+
+    with hfs.open(args['staging_remote_tmpdir'].rstrip('/') + '/config.json', 'w') as f:
+        f.write(json.dumps(args, indent=4) + '\n')
 
     batch_regions = args['batch_regions']
     if batch_regions is not None:
@@ -195,6 +220,11 @@ def impute(args: dict):
                          requested_chunk_index=args['chunk_index'],
                          requester_pays_config=args['gcs_requester_pays_configuration'])
 
+    chunks = [chunk for chunk in chunks if chunk.contig != "chrX"]
+
+    print(f'found {len(chunks)} chunks')
+    print(f'found {len(sample_groups)} sample groups')
+
     contig_chunks = defaultdict(list)
     for chunk in chunks:
         contig_chunks[chunk.contig].append(chunk)
@@ -202,18 +232,18 @@ def impute(args: dict):
     fasta_input = b.read_input_group(**{'fasta': args['fasta'], 'fasta.fai': f'{args["fasta"]}.fai'})
     ref_dict = b.read_input(args['ligate_ref_dict'])
 
-    intervals_dill_file = args['staging_remote_tmpdir'].rstrip('/') + '/intervals.json'
-
     success_jobs = []
+    prev_copy_cram_jobs = []
     for sample_group in sample_groups:
-        success_j = run_sample_group(b,
-                                     args,
-                                     contig_chunks,
-                                     sample_group,
-                                     fasta_input,
-                                     ref_dict,
-                                     args['samples_per_copy_group'],
-                                     intervals_dill_file)
+        prev_copy_cram_jobs, success_j = await run_sample_group(b,
+                                                                args,
+                                                                contig_chunks,
+                                                                sample_group,
+                                                                fasta_input,
+                                                                ref_dict,
+                                                                args['samples_per_copy_group'],
+                                                                prev_copy_cram_jobs,
+                                                                backend._fs)
         if success_j is not None:
             success_jobs.append(success_j)
 
@@ -235,11 +265,11 @@ def impute(args: dict):
                                   args['batch_remote_tmpdir'],
                                   batch_regions,
                                   args['use_checkpoints'],
-                                  intervals_dill_file)
+                                  n_partitions=len(chunks))
     if union_j is not None:
         union_j.depends_on(*success_jobs)
 
-    b.run(wait=False, disable_progress_bar=False)
+    b.run(disable_progress_bar=False)
 
     backend.close()
 
@@ -302,8 +332,8 @@ if __name__ == '__main__':
 
     # Extra merge vcf arguments
     parser.add_argument('--merge-vcf-cpu', type=int, required=True)
-    parser.add_argument('--merge-vcf-memory', type=str, required=False, default='standard')
-    parser.add_argument('--merge-vcf-storage', type=str, required=False, default='30Gi')
+    parser.add_argument('--merge-vcf-memory', type=str, required=False, default='lowmem')
+    parser.add_argument('--merge-vcf-storage', type=str, required=False, default='0Gi')
 
     parser.add_argument('--gcs-requester-pays-configuration', type=str, required=False)
 
@@ -311,4 +341,4 @@ if __name__ == '__main__':
 
     print('submitting jobs with the following parameters:')
     print(json.dumps(args, indent=4))
-    impute(args)
+    asyncio.run(impute(args))

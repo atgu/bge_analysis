@@ -5,10 +5,16 @@ import json
 import os
 import uuid
 from collections import defaultdict, namedtuple
+
+from hailtop.aiotools.router_fs import RouterAsyncFS
 from humanize import naturalsize
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import hailtop.fs as hfs
+
+
+async def file_exists(fs: RouterAsyncFS, path: str):
+    return await fs.exists(path)
 
 
 Chunk = namedtuple('Chunk', ['contig', 'chunk_idx', 'n_common', 'n_rare', 'info_path', 'path', 'n_variants'])
@@ -211,10 +217,10 @@ class SampleGroup:
     def phased_glimpse_checkpoint_file(self, contig: str, chunk_index: int):
         return f'{self.temp_dir}/phase/{contig}/chunk-{chunk_index}/glimpse_checkpoint'
 
-    def initialize_phased_glimpse_checkpoint_file(self, contig: str, chunk_index: int) -> str:
+    async def initialize_phased_glimpse_checkpoint_file(self, fs: RouterAsyncFS, contig: str, chunk_index: int) -> str:
         path = self.phased_glimpse_checkpoint_file(contig, chunk_index)
-        with hfs.open(path, 'w') as f:
-            f.write("")
+        async with await fs.create(path) as f:
+            await f.write(b"")
         return path
 
     def get_phased_output_file_names(self, contig_chunks: Dict[str, List[Chunk]]) -> Dict[str, List[str]]:

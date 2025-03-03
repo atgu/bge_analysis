@@ -29,8 +29,8 @@ def estimate_resources(args: dict):
     results_table = []
 
     for cores in (1, 2, 4, 8, 16):
-        max_batch_size =  cores * max_runtime / (1e-5 * max_chunk_size)  # 5e-6
-        optimal_batch_size = cores * goal_runtime / (1e-5 * mean_chunk_size)
+        max_batch_size =  cores * max_runtime / (7e-6 * max_chunk_size)  # 5e-6
+        optimal_batch_size = cores * goal_runtime / (7e-6 * mean_chunk_size)
         actual_batch_size = min(optimal_batch_size, max_batch_size)
         n_batches = math.ceil(args['n_samples']  / actual_batch_size)
 
