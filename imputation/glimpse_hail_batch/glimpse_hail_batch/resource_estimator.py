@@ -25,27 +25,52 @@ def estimate_resources(args: dict):
 
     goal_runtime = args['target_runtime_mins']
     max_runtime = args['max_runtime_mins']
+    min_runtime = args['min_runtime_mins']
 
     results_table = []
 
     for cores in (1, 2, 4, 8, 16):
-        max_batch_size =  cores * max_runtime / (7e-6 * max_chunk_size)  # 5e-6
-        optimal_batch_size = cores * goal_runtime / (7e-6 * mean_chunk_size)
-        actual_batch_size = min(optimal_batch_size, max_batch_size)
-        n_batches = math.ceil(args['n_samples']  / actual_batch_size)
+        max_batch_size = cores * max_runtime / (7e-6 * max_chunk_size)  # 5e-6
+        min_batch_size = cores * min_runtime / (7e-6 * max_chunk_size)  # 5e-6
+        goal_batch_size = cores * goal_runtime / (7e-6 * mean_chunk_size)
 
-        max_memory = 0
-        mean_memory = 0
-        for chunk in chunks:
-            max_memory = max(max_memory, math.ceil((800e-3 + 0.97e-6 * chunk.n_rare * cores + 14.6e-6 * chunk.n_common * cores + 6.5e-9 * (chunk.n_rare + chunk.n_common) * max_batch_size + 13.7e-3 * max_batch_size + 1.8e-6 * (chunk.n_rare + chunk.n_common) * math.log(max_batch_size)))) / cores
-            mean_memory = max(mean_memory, math.ceil((800e-3 + 0.97e-6 * chunk.n_rare * cores + 14.6e-6 * chunk.n_common * cores + 6.5e-9 * (chunk.n_rare + chunk.n_common) * optimal_batch_size + 13.7e-3 * optimal_batch_size + 1.8e-6 * (chunk.n_rare + chunk.n_common) * math.log(optimal_batch_size)))) / cores
+        batch_sizes = [goal_batch_size, min_batch_size]
+        batch_size = min_batch_size
+        while batch_size < max_batch_size:
+            batch_size *= 2
+            batch_sizes.append(batch_size)
 
-        rough_cost = n_batches * cores * (goal_runtime / 60) * 0.03 * len(chunks)
-        rough_cost_per_sample = rough_cost / args['n_samples']
+        for actual_batch_size in batch_sizes:
+            n_batches = math.ceil(args['n_samples']  / actual_batch_size)
 
-        results_table.append([cores, args['n_samples'], goal_runtime, max_runtime, optimal_batch_size, max_batch_size, actual_batch_size, max_memory, mean_memory, rough_cost, rough_cost_per_sample])
+            rough_cost = 0
 
-    print(tabulate(results_table, headers=['cores', 'n_samples', 'goal_runtime', 'max_runtime', 'optimal_batch_size', 'max_batch_size', 'actual_batch_size', 'max_memory', 'mean_memory', 'rough_cost_estimate', 'rough_cost_estimate_per_sample']))
+            n_lowmem = 0
+            n_standard = 0
+            n_highmem = 0
+
+            for chunk in chunks:
+                memory_req = math.ceil((800e-3 + 0.97e-6 * chunk.n_rare * cores + 14.6e-6 * chunk.n_common * cores + 6.5e-9 * (chunk.n_rare + chunk.n_common) * actual_batch_size + 13.7e-3 * actual_batch_size + 1.8e-6 * (chunk.n_rare + chunk.n_common) * math.log(actual_batch_size))) / cores
+
+                if memory_req <= 1:
+                    cost_per_core_hour = 0.02429905
+                    n_lowmem += 1
+                elif 1 < memory_req <= 4:
+                    cost_per_core_hour = 0.02684125
+                    n_standard += 1
+                else:
+                    cost_per_core_hour = 0.02929425
+                    n_highmem += 1
+
+                estimated_runtime_mins = (7e-6 * mean_chunk_size * actual_batch_size) / cores
+
+                rough_cost += n_batches * cores * (estimated_runtime_mins / 60) * cost_per_core_hour
+
+            rough_cost_per_sample = rough_cost / args['n_samples']
+
+            results_table.append([cores, args['n_samples'], n_batches, goal_runtime, min_runtime, max_runtime, min_batch_size, max_batch_size, actual_batch_size, rough_cost, rough_cost_per_sample, n_lowmem, n_standard, n_highmem])
+
+    print(tabulate(results_table, headers=['cores', 'n_samples', 'n_batches', 'goal_runtime', 'min_runtime', 'max_runtime', 'min_batch_size', 'max_batch_size', 'actual_batch_size', 'rough_cost_estimate', 'rough_cost_estimate_per_sample', 'n_lowmem', 'n_standard', 'n_highmem']))
 
 
 if __name__ == '__main__':
@@ -55,6 +80,7 @@ if __name__ == '__main__':
     p.add_argument("--chunk-info-dir", type=str, required=True)
     p.add_argument('--binary-reference-file-regex', type=str, required=True)
 
+    p.add_argument('--min-runtime-mins', type=int, required=True)
     p.add_argument('--max-runtime-mins', type=int, required=True)
     p.add_argument('--target-runtime-mins', type=int, required=True)
     p.add_argument('--n-samples', type=int, required=True)

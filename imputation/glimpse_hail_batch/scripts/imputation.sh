@@ -41,6 +41,7 @@ python3 -m glimpse_hail_batch.imputation \
     --ligate-cpu 4 \
     --ligate-memory "standard" \
     --merge-vcf-cpu 16 \
+    --merge-vcf-memory "highmem" \
     --sample-manifest $SAMPLE_MANIFEST \
     --sample-id-col "entity:sample_id" \
     --cram-path-col "genome_cram_path" \

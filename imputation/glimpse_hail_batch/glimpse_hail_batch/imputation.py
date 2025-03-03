@@ -38,13 +38,23 @@ async def run_sample_group(b: hb.Batch,
     skip_merge_vcf = False
 
     ligated_output_files_by_contig = sample_group.get_ligate_output_file_names(contig_chunks)
-    if args['use_checkpoints']:
-        is_ligate_complete = all([hfs.exists(file + '.vcf.bgz') for contig, file in ligated_output_files_by_contig.items()])
-        is_merge_complete = False # CHeckc for success file hfs.is_dir(sample_group.merged_mt_path)
+    phased_output_files = sample_group.get_phased_output_file_names(contig_chunks)
 
-        skip_copy_crams = is_merge_complete or is_ligate_complete
-        skip_phasing = is_merge_complete or is_ligate_complete
-        skip_ligate = is_merge_complete or is_ligate_complete
+    phasing_already_completed = [False for contig, chunks in contig_chunks.items() for _ in chunks]
+
+    if args['use_checkpoints']:
+        phasing_already_completed = await bounded_gather(*[partial(file_exists, fs, phased_output_files[contig][chunk.chunk_idx] + '.bcf')
+                                                                for contig, chunks in contig_chunks.items()
+                                                                for chunk in chunks],
+                                                                cancel_on_error=True)
+
+        is_phasing_complete = all(phasing_already_completed)
+        is_ligate_complete = all([hfs.exists(file + '.vcf.bgz') for contig, file in ligated_output_files_by_contig.items()])
+        is_merge_complete = False # Check for success file hfs.is_dir(sample_group.merged_mt_path)
+
+        skip_copy_crams = is_phasing_complete
+        skip_phasing = is_phasing_complete
+        skip_ligate = is_ligate_complete
         skip_merge_vcf = is_merge_complete
 
     copy_cram_jobs = []
@@ -67,7 +77,6 @@ async def run_sample_group(b: hb.Batch,
             copy_cram_jobs.append(copy_j)
 
     phase_jobs = []
-    phased_output_files = sample_group.get_phased_output_file_names(contig_chunks)
 
     n_variants_contig = {contig: sum(chunk.n_variants for chunk in chunks) for contig, chunks in contig_chunks.items()}
 
@@ -80,17 +89,12 @@ async def run_sample_group(b: hb.Batch,
                                                         for chunk in chunks],
                                                       cancel_on_error=True)
 
-        already_completed = await bounded_gather(*[partial(file_exists, fs, phased_output_files[contig][chunk.chunk_idx] + '.bcf')
-                                                        for contig, chunks in contig_chunks.items()
-                                                        for chunk in chunks],
-                                                      cancel_on_error=True)
-
         chunk_idx = 0
         for contig, chunks in contig_chunks.items():
             for chunk in chunks:
                 phased_output_file = phased_output_files[contig][chunk.chunk_idx]
 
-                phase_exists = already_completed[chunk_idx]
+                phase_exists = phasing_already_completed[chunk_idx]
                 phase_checkpoint_file = phase_checkpoint_files[chunk_idx]
 
                 phase_j = phase(b,

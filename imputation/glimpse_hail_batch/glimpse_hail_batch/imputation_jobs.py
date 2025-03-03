@@ -155,20 +155,29 @@ def ligate(b: hb.Batch,
 
     chunk_files_str = '\n'.join([str(chunk.bcf) for chunk in chunk_outputs])
 
+    touch_files_str = '\n'.join([f'touch {chunk.csi}' for chunk in chunk_outputs])
+
     ligate_cmd = f'''
 cat > input_list.txt <<EOF
 {chunk_files_str}
 EOF
 
-cat input_list.txt
-    
+cat > touch.sh <<EOF
+{touch_files_str}
+EOF
+
+sh touch.sh
+
 /bin/GLIMPSE2_ligate --input input_list.txt --output ligated.vcf.gz --threads {cpu}
 
 # Set correct reference dictionary
 bcftools view -h --no-version ligated.vcf.gz > old_header.vcf        
 java -jar /picard.jar UpdateVcfSequenceDictionary -I old_header.vcf --SD {ref_dict} -O new_header.vcf        
-bcftools reheader -h new_header.vcf -o {j.ligated.vcf} ligated.vcf.gz
-tabix {j.ligated.vcf}
+bcftools reheader -h new_header.vcf -o updated_ligated.vcf.gz ligated.vcf.gz
+
+mkdir /io/temp-sort/
+bcftools sort -m 4G -O z -o {j.ligated.vcf} -T /io/temp-sort/ -W=tbi updated_ligated.vcf.gz
+
 md5sum {j.ligated.vcf} | awk '{{ print $1 }}' > {j.ligated.md5sum}
 touch {j.ligated.tbi}  # this is a dummy operation; todo to figure out why this is necessary
 '''
@@ -231,8 +240,12 @@ python3 << EOF
 import hail as hl
 import hailtop.fs as hfs
 
-# hl.init(backend="spark", local="local[{cpu}]", default_reference="GRCh38", tmp_dir="/io/", local_tmpdir="/io/")
-hl.init(backend="local", default_reference="GRCh38", tmp_dir="/io/")
+hl.init(backend="spark", 
+        local="local[{cpu}]",
+        default_reference="GRCh38",
+        tmp_dir="/io/",
+        local_tmpdir="/io/",
+        spark_conf={{"spark.executor.memory": "7g", "spark.driver.memory": "7g", "spark.driver.maxResultSize": "7g"}})
 
 mt = hl.import_vcf("{file_path_regex}")
 mt = mt.annotate_rows(info=mt.info.annotate(N={len(sample_group.samples)}, AF=mt.info.AF[0], INFO=mt.info.INFO[0], RAF=mt.info.RAF[0]))
