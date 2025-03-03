@@ -15,32 +15,13 @@ def estimate_resources(args: dict):
     chunks = find_chunks(args['reference_dir'],
                          args['chunk_info_dir'],
                          re.compile(args['binary_reference_file_regex']),
+                         re.compile(args['chunk_file_regex']),
                          requester_pays_config=args['gcs_requester_pays_configuration'])
-
-    chunks = [chunk for chunk in chunks]
-    chunk_sizes = [chunk.n_rare + chunk.n_common for chunk in chunks]
-
-    mean_chunk_size = statistics.mean(chunk_sizes)
-    max_chunk_size = max(chunk_sizes)
-
-    goal_runtime = args['target_runtime_mins']
-    max_runtime = args['max_runtime_mins']
-    min_runtime = args['min_runtime_mins']
 
     results_table = []
 
-    for cores in (1, 2, 4, 8, 16):
-        max_batch_size = cores * max_runtime / (7e-6 * max_chunk_size)  # 5e-6
-        min_batch_size = cores * min_runtime / (7e-6 * max_chunk_size)  # 5e-6
-        goal_batch_size = cores * goal_runtime / (7e-6 * mean_chunk_size)
-
-        batch_sizes = [goal_batch_size, min_batch_size]
-        batch_size = min_batch_size
-        while batch_size < max_batch_size:
-            batch_size *= 2
-            batch_sizes.append(batch_size)
-
-        for actual_batch_size in batch_sizes:
+    for actual_batch_size in range(50, 2000, 50):
+        for cores in (1, 2, 4, 8, 16):
             n_batches = math.ceil(args['n_samples']  / actual_batch_size)
 
             rough_cost = 0
@@ -48,6 +29,10 @@ def estimate_resources(args: dict):
             n_lowmem = 0
             n_standard = 0
             n_highmem = 0
+
+            max_runtime = 0
+            min_runtime = 1000000000
+            runtimes = []
 
             for chunk in chunks:
                 memory_req = math.ceil((800e-3 + 0.97e-6 * chunk.n_rare * cores + 14.6e-6 * chunk.n_common * cores + 6.5e-9 * (chunk.n_rare + chunk.n_common) * actual_batch_size + 13.7e-3 * actual_batch_size + 1.8e-6 * (chunk.n_rare + chunk.n_common) * math.log(actual_batch_size))) / cores
@@ -62,15 +47,20 @@ def estimate_resources(args: dict):
                     cost_per_core_hour = 0.02929425
                     n_highmem += 1
 
-                estimated_runtime_mins = (7e-6 * mean_chunk_size * actual_batch_size) / cores
+                estimated_runtime_mins = 3 + ((7.5e-5 * (chunk.n_rare + chunk.n_common) * actual_batch_size) / cores)
 
                 rough_cost += n_batches * cores * (estimated_runtime_mins / 60) * cost_per_core_hour
 
+                max_runtime = max(max_runtime, estimated_runtime_mins)
+                min_runtime = min(min_runtime, estimated_runtime_mins)
+                runtimes.append(estimated_runtime_mins)
+
             rough_cost_per_sample = rough_cost / args['n_samples']
+            mean_runtime = statistics.mean(runtimes)
 
-            results_table.append([cores, args['n_samples'], n_batches, goal_runtime, min_runtime, max_runtime, min_batch_size, max_batch_size, actual_batch_size, rough_cost, rough_cost_per_sample, n_lowmem, n_standard, n_highmem])
+            results_table.append([cores, args['n_samples'], n_batches, min_runtime, max_runtime, mean_runtime, actual_batch_size, rough_cost, rough_cost_per_sample, n_lowmem, n_standard, n_highmem])
 
-    print(tabulate(results_table, headers=['cores', 'n_samples', 'n_batches', 'goal_runtime', 'min_runtime', 'max_runtime', 'min_batch_size', 'max_batch_size', 'actual_batch_size', 'rough_cost_estimate', 'rough_cost_estimate_per_sample', 'n_lowmem', 'n_standard', 'n_highmem']))
+    print(tabulate(results_table, headers=['cores', 'n_samples', 'n_batches', 'min_runtime', 'max_runtime', 'mean_runtime', 'batch_size', 'rough_cost_estimate', 'rough_cost_estimate_per_sample', 'n_lowmem', 'n_standard', 'n_highmem']))
 
 
 if __name__ == '__main__':
@@ -79,12 +69,8 @@ if __name__ == '__main__':
     p.add_argument("--reference-dir", type=str, required=True)
     p.add_argument("--chunk-info-dir", type=str, required=True)
     p.add_argument('--binary-reference-file-regex', type=str, required=True)
-
-    p.add_argument('--min-runtime-mins', type=int, required=True)
-    p.add_argument('--max-runtime-mins', type=int, required=True)
-    p.add_argument('--target-runtime-mins', type=int, required=True)
+    p.add_argument('--chunk-file-regex', type=str, required=True)
     p.add_argument('--n-samples', type=int, required=True)
-
     p.add_argument('--gcs-requester-pays-configuration', type=str, required=False)
 
     args = p.parse_args()

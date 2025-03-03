@@ -17,7 +17,7 @@ async def file_exists(fs: RouterAsyncFS, path: str):
     return await fs.exists(path)
 
 
-Chunk = namedtuple('Chunk', ['contig', 'chunk_idx', 'n_common', 'n_rare', 'info_path', 'path', 'n_variants'])
+Chunk = namedtuple('Chunk', ['chunk_contig', 'reference_contig', 'chunk_idx', 'n_common', 'n_rare', 'info_path', 'path', 'n_variants'])
 
 
 def reference_file_dir_str(output_dir: str) -> str:
@@ -39,15 +39,6 @@ def reference_file_str() -> str:
     return f'ref_chunk_${{CONTIG}}_${{CHUNKINDEX}}'
 
 
-def parse_binary_reference_path(path: str) -> Tuple[str, int]:
-    ext = '.bin'
-    file = os.path.basename(path)
-    segments = file.replace(ext, '').split('_')
-    contig = '_'.join(segments[2:-1])
-    chunk_index = int(segments[-1])
-    return (contig, chunk_index)
-
-
 def parse_chunk_path(path: str) -> str:
     ext = '.txt'
     file = os.path.basename(path)
@@ -62,6 +53,7 @@ chunk_manifest_header = ['chunk_idx', 'contig', 'buffered_region', 'actual_regio
 def find_chunks(reference_dir: Optional[str],
                 chunk_info_dir: Optional[str],
                 binary_reference_file_regex: re.Pattern,
+                chunk_file_regex: re.Pattern,
                 *,
                 requested_contig: Optional[str] = None,
                 requested_chunk_index: Optional[int] = None,
@@ -80,14 +72,16 @@ def find_chunks(reference_dir: Optional[str],
         reference_paths[(contig, chunk_index)] = file.path
 
     for chunk_info_file in chunk_info_files:
-        contig = parse_chunk_path(chunk_info_file.path)
+        match = chunk_file_regex.fullmatch(os.path.basename(chunk_info_file.path)).groupdict()
+        contig = match['contig']
 
         with hfs.open(chunk_info_file.path, 'r', requester_pays_config=requester_pays_config) as f:
             chunks_df = pd.read_csv(io.StringIO(f.read()), sep="\t", names=chunk_manifest_header)
 
         # Note: the contig in the file name can be different than the actual contig in the chunks file!
         for _, row in chunks_df.iterrows():
-            chunks.append(Chunk(contig=row['contig'],
+            chunks.append(Chunk(chunk_contig=contig,
+                                reference_contig=row['contig'],
                                 chunk_idx=int(row['chunk_idx']),
                                 n_common=row['n_common'],
                                 n_rare=row['n_variants'] - row['n_common'],
@@ -98,7 +92,7 @@ def find_chunks(reference_dir: Optional[str],
     chunks.sort(key=lambda c: c.chunk_idx)
 
     if requested_contig is not None:
-        chunks = [chunk for chunk in chunks if chunk.contig == requested_contig]
+        chunks = [chunk for chunk in chunks if chunk.chunk_contig == requested_contig]
         if requested_chunk_index is not None:
             chunks = [chunk for chunk in chunks if chunk.chunk_idx == requested_chunk_index]
 
@@ -321,6 +315,6 @@ def split_samples_into_groups(samples: List[Sample],
 
 
 def get_ligate_storage_requirement(base_gib: int, n_samples: int, n_variants: int) -> str:
-    n_bytes = (base_gib * 1024 * 1024 * 1024) + 2 * int(0.91527225871 * n_samples * n_variants)
+    n_bytes = (base_gib * 1024 * 1024 * 1024) + 5 * int(0.91527225871 * n_samples * n_variants)
     size = naturalsize(n_bytes, binary=True, format="%d")
     return size.replace(' ', '')

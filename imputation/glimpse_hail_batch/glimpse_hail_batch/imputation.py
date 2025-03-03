@@ -129,7 +129,7 @@ async def run_sample_group(b: hb.Batch,
             phased_inputs = [b.read_input_group(bcf=file + '.bcf', csi=file + '.bcf.csi')
                              for file in phased_output_files[contig]]
 
-            ligate_storage_required = args['ligate_storage'] or get_ligate_storage_requirement(20, len(sample_group.samples), n_variants_contig[contig])
+            ligate_storage_required = args['ligate_storage'] or get_ligate_storage_requirement(50, len(sample_group.samples), n_variants_contig[contig])
 
             ligate_j = ligate(b,
                               sample_group,
@@ -223,18 +223,17 @@ async def impute(args: dict):
     chunks = find_chunks(args['reference_dir'],
                          args['chunk_info_dir'],
                          re.compile(args['binary_reference_file_regex']),
+                         re.compile(args['chunk_file_regex']),
                          requested_contig=args['contig'],
                          requested_chunk_index=args['chunk_index'],
                          requester_pays_config=args['gcs_requester_pays_configuration'])
-
-    chunks = [chunk for chunk in chunks if chunk.contig != "chrX"]
 
     print(f'found {len(chunks)} chunks')
     print(f'found {len(sample_groups)} sample groups')
 
     contig_chunks = defaultdict(list)
     for chunk in chunks:
-        contig_chunks[chunk.contig].append(chunk)
+        contig_chunks[chunk.chunk_contig].append(chunk)
 
     fasta_input = b.read_input_group(**{'fasta': args['fasta'], 'fasta.fai': f'{args["fasta"]}.fai'})
     ref_dict = b.read_input(args['ligate_ref_dict'])
@@ -298,6 +297,7 @@ if __name__ == '__main__':
     parser.add_argument("--reference-dir", type=str, required=True)
     parser.add_argument("--chunk-info-dir", type=str, required=True)
     parser.add_argument('--binary-reference-file-regex', type=str, required=True)
+    parser.add_argument('--chunk-file-regex', type=str, required=True)
 
     parser.add_argument('--sample-manifest', type=str, required=True)
     parser.add_argument('--sample-id-col', type=str, required=True)

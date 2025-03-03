@@ -139,7 +139,7 @@ def ligate(b: hb.Batch,
            output_file: str,
            ref_dict: hb.ResourceFile,
            use_checkpoint: bool) -> Optional[Job]:
-    if use_checkpoint and hfs.exists(output_file + '.vcf.gz'):
+    if use_checkpoint and hfs.exists(output_file + '.vcf.bgz'):
        return None
 
     j = b.new_bash_job(name=f'ligate/sample-group-{sample_group.sample_group_index}/{contig}',
@@ -154,12 +154,12 @@ def ligate(b: hb.Batch,
                                       'md5sum': '{root}.md5sum'})
 
     if memory == "lowmem":
-        memory_ratio = 1
+        memory_ratio = 0.5
     elif memory == "standard":
-        memory_ratio = 3.5
+        memory_ratio = 3
     else:
         assert memory == "highmem"
-        memory_ratio = 7.5
+        memory_ratio = 7
 
     chunk_files_str = '\n'.join([str(chunk.bcf) for chunk in chunk_outputs])
 
@@ -260,7 +260,6 @@ mt = mt.annotate_rows(info=mt.info.annotate(N={len(sample_group.samples)}, AF=mt
 mt.write("{output_path}", overwrite=True)
 EOF
 ''')
-
 
     return j
 

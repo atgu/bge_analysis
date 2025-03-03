@@ -9,7 +9,8 @@ REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/test-glimpse/batch/"
 
 CHUNK_INFO_DIR="gs://jigold-batch-tmp-ezxyx/test-regenerate-chunks/"
 BINARY_REFERENCE_DIR="gs://bge-dragen-imputation/hgdp1kg/binary_reference/"
-FILE_REGEX="ref_chunk_(?P<contig>.*)_(?P<chunk_index>\d+).bin"
+FILE_REGEX="ref_chunk_(?P<contig>.+)_(?P<chunk_index>\d+).bin"
+CHUNK_FILE_REGEX="chunks_(?P<contig>.+)\.txt"
 SAMPLE_GROUP_SIZE=300
 PHASE_CPU=16
 
@@ -17,12 +18,12 @@ PHASE_CPU=16
 SAMPLE_MANIFEST="/Users/jigold/Downloads/gcp_pumas_scz.sample_manifest.tsv"
 
 #STAGING_REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/staging/Vietnam_SCZ_BGE_Cases-test/"
-STAGING_REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/staging/test_50/"
+STAGING_REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/staging/test_10/"
 
 FASTA="gs://jigold-batch-tmp-ezxyx/fasta/Homo_sapiens_assembly38.fasta"
 
 #OUTPUT_FILE="gs://jigold-batch-tmp-ezxyx/glimpse-outputs/Vietnam_SCZ_BGE_Cases.mt"
-OUTPUT_FILE="gs://jigold-batch-tmp-ezxyx/glimpse-outputs/test_50.mt"
+OUTPUT_FILE="gs://jigold-batch-tmp-ezxyx/glimpse-outputs/test_10.mt"
 
 
 python3 -m glimpse_hail_batch.imputation \
@@ -48,10 +49,11 @@ python3 -m glimpse_hail_batch.imputation \
     --cram-index-path-col "genome_crai_path" \
     --output-file $OUTPUT_FILE \
     --binary-reference-file-regex $FILE_REGEX \
+    --chunk-file-regex $CHUNK_FILE_REGEX \
     --reference-dir $BINARY_REFERENCE_DIR \
     --chunk-info-dir $CHUNK_INFO_DIR \
     --gcs-requester-pays-configuration $BILLING_PROJECT \
     --save-checkpoints \
     --use-checkpoints \
-    --contig "chr22" \
-    --n-samples 50
+    --contig "chrX_PAR1" \
+    --n-samples 10

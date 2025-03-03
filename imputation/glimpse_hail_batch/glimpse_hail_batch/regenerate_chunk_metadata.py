@@ -7,8 +7,6 @@ from typing import List
 import hailtop.batch as hb
 import hailtop.fs as hfs
 
-from .globals import parse_chunk_path
-
 
 def get_number_of_sites_in_chunk(b: hb.Batch,
                                  reference_chunk: hb.ResourceFile,
@@ -61,6 +59,7 @@ def regenerate_chunk_metadata(args: dict):
     reference_dir = args['reference_dir']
     chunk_info_dir = args['chunk_info_dir']
     binary_reference_file_regex = re.compile(args['binary_reference_file_regex'])
+    chunk_file_regex = re.compile(args['chunk_file_regex'])
 
     reference_files = hfs.ls(reference_dir, requester_pays_config=args['gcs_requester_pays_configuration'])
 
@@ -88,7 +87,7 @@ def regenerate_chunk_metadata(args: dict):
     else:
         chunk_info_files = hfs.ls(chunk_info_dir, requester_pays_config=args['gcs_requester_pays_configuration'])
 
-        chunk_info = {parse_chunk_path(chunk_info_file.path): chunk_info_file.path
+        chunk_info = {chunk_file_regex.fullmatch(os.path.basename(chunk_info_file.path)).groupdict()['contig']: chunk_info_file.path
                       for chunk_info_file in chunk_info_files}
 
     contig_chunk_info = defaultdict(list)
