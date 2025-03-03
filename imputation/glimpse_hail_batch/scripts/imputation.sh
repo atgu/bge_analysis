@@ -17,19 +17,19 @@ PHASE_CPU=16
 SAMPLE_MANIFEST="/Users/jigold/Downloads/gcp_pumas_scz.sample_manifest.tsv"
 
 #STAGING_REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/staging/Vietnam_SCZ_BGE_Cases-test/"
-STAGING_REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/staging/test_gcp_800/"
+STAGING_REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/staging/test_50/"
 
 FASTA="gs://jigold-batch-tmp-ezxyx/fasta/Homo_sapiens_assembly38.fasta"
 
 #OUTPUT_FILE="gs://jigold-batch-tmp-ezxyx/glimpse-outputs/Vietnam_SCZ_BGE_Cases.mt"
-OUTPUT_FILE="gs://jigold-batch-tmp-ezxyx/glimpse-outputs/test_gcp_800.mt"
+OUTPUT_FILE="gs://jigold-batch-tmp-ezxyx/glimpse-outputs/test_50.mt"
 
 
 python3 -m glimpse_hail_batch.imputation \
     --billing-project $BILLING_PROJECT \
     --batch-remote-tmpdir $REMOTE_TMPDIR \
     --batch-regions "us-central1" \
-    --batch-name "glimpse-gcp" \
+    --batch-name "glimpse-test-50" \
     --docker-hail "hailgenetics/hail:0.2.133" \
     --docker-glimpse "us-central1-docker.pkg.dev/neale-pumas-bge/glimpse2/glimpse2-gcloud:odelaneau_bd93ade" \
     --fasta $FASTA \
@@ -40,8 +40,8 @@ python3 -m glimpse_hail_batch.imputation \
     --phase-memory "standard" \
     --ligate-cpu 4 \
     --ligate-memory "standard" \
-    --merge-vcf-cpu 16 \
-    --merge-vcf-memory "highmem" \
+    --merge-vcf-cpu 4 \
+    --merge-vcf-memory "standard" \
     --sample-manifest $SAMPLE_MANIFEST \
     --sample-id-col "entity:sample_id" \
     --cram-path-col "genome_cram_path" \
@@ -53,4 +53,5 @@ python3 -m glimpse_hail_batch.imputation \
     --gcs-requester-pays-configuration $BILLING_PROJECT \
     --save-checkpoints \
     --use-checkpoints \
-    --n-samples 800
+    --contig "chr22" \
+    --n-samples 50

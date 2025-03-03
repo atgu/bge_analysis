@@ -50,7 +50,7 @@ async def run_sample_group(b: hb.Batch,
 
         is_phasing_complete = all(phasing_already_completed)
         is_ligate_complete = all([hfs.exists(file + '.vcf.bgz') for contig, file in ligated_output_files_by_contig.items()])
-        is_merge_complete = False # Check for success file hfs.is_dir(sample_group.merged_mt_path)
+        is_merge_complete =  hfs.exists(sample_group.merged_mt_path + '/_SUCCESS')
 
         skip_copy_crams = is_phasing_complete
         skip_phasing = is_phasing_complete
@@ -115,8 +115,7 @@ async def run_sample_group(b: hb.Batch,
                                 args['phase_call_indels'],
                                 args['phase_n_burn_in'],
                                 args['phase_n_main'],
-                                args['phase_effective_population_size']
-                                )
+                                args['phase_effective_population_size'])
 
                 if phase_j is not None:
                     phase_j.depends_on(*copy_cram_jobs)
@@ -197,9 +196,13 @@ async def impute(args: dict):
                                 gcs_requester_pays_configuration=args['gcs_requester_pays_configuration'])
 
     if args['batch_id'] is not None:
-        b = hb.Batch.from_batch_id(args['batch_id'], backend=backend, requester_pays_project=args['gcs_requester_pays_configuration'])
+        b = hb.Batch.from_batch_id(args['batch_id'],
+                                   backend=backend,
+                                   requester_pays_project=args['gcs_requester_pays_configuration'])
     else:
-        b = hb.Batch(name=batch_name, backend=backend, requester_pays_project=args['gcs_requester_pays_configuration'])
+        b = hb.Batch(name=batch_name,
+                     backend=backend,
+                     requester_pays_project=args['gcs_requester_pays_configuration'])
 
     mount_point = '/crams/'
 

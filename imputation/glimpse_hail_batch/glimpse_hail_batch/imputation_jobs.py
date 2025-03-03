@@ -153,6 +153,14 @@ def ligate(b: hb.Batch,
                                       'tbi': '{root}.vcf.gz.tbi',
                                       'md5sum': '{root}.md5sum'})
 
+    if memory == "lowmem":
+        memory_ratio = 1
+    elif memory == "standard":
+        memory_ratio = 3.5
+    else:
+        assert memory == "highmem"
+        memory_ratio = 7.5
+
     chunk_files_str = '\n'.join([str(chunk.bcf) for chunk in chunk_outputs])
 
     touch_files_str = '\n'.join([f'touch {chunk.csi}' for chunk in chunk_outputs])
@@ -176,8 +184,9 @@ java -jar /picard.jar UpdateVcfSequenceDictionary -I old_header.vcf --SD {ref_di
 bcftools reheader -h new_header.vcf -o updated_ligated.vcf.gz ligated.vcf.gz
 
 mkdir /io/temp-sort/
-bcftools sort -m 4G -O z -o {j.ligated.vcf} -T /io/temp-sort/ -W=tbi updated_ligated.vcf.gz
+bcftools sort -m {memory_ratio * cpu}G -O z -o {j.ligated.vcf} -T /io/temp-sort/ updated_ligated.vcf.gz
 
+tabix {j.ligated.vcf}
 md5sum {j.ligated.vcf} | awk '{{ print $1 }}' > {j.ligated.md5sum}
 touch {j.ligated.tbi}  # this is a dummy operation; todo to figure out why this is necessary
 '''
@@ -224,9 +233,8 @@ def merge_vcfs(b: hb.Batch,
                memory: str,
                storage: str,
                use_checkpoint: bool) -> Optional[Job]:
-    # FIXME: check for success file
-    # if use_checkpoint and hfs.exists(output_path):
-    #     return None
+    if use_checkpoint and hfs.exists(output_path + '/_SUCCESS'):
+        return None
 
     j = b.new_bash_job(attributes={'name': f'merge-vcfs/sample-group-{sample_group.sample_group_index}',
                                    'task': 'merge-vcfs'})

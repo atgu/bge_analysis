@@ -321,6 +321,6 @@ def split_samples_into_groups(samples: List[Sample],
 
 
 def get_ligate_storage_requirement(base_gib: int, n_samples: int, n_variants: int) -> str:
-    n_bytes = (base_gib * 1024 * 1024 * 1024) + int(0.91527225871 * n_samples * n_variants)
+    n_bytes = (base_gib * 1024 * 1024 * 1024) + 2 * int(0.91527225871 * n_samples * n_variants)
     size = naturalsize(n_bytes, binary=True, format="%d")
     return size.replace(' ', '')
