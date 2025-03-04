@@ -2,7 +2,6 @@
 
 BILLING_PROJECT="neale-pumas-bge"
 REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/test-glimpse/batch/"
-#SPLIT_REFERENCE_PANEL_OUTPUT_DIR="gs://bge-dragen-imputation/hgdp1kg/"
 SPLIT_REFERENCE_PANEL_OUTPUT_DIR="gs://broad-dsde-methods-bge-resources-public/GlimpseImputation/ReferencePanels/1000G_HGDP_no_singletons/chunks/cm_4/boost_1_78_0/bin/"
 OUTPUT_DIR="gs://jigold-batch-tmp-ezxyx/test-regenerate-chunks-1000G_HGDP_no_singletons/"
 
