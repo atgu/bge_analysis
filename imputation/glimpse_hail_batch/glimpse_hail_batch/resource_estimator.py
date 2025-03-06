@@ -29,6 +29,7 @@ def estimate_resources(args: dict):
             n_lowmem = 0
             n_standard = 0
             n_highmem = 0
+            n_oom = 0
 
             max_runtime = 0
             min_runtime = 1000000000
@@ -43,11 +44,14 @@ def estimate_resources(args: dict):
                 elif 1 < memory_req <= 4:
                     cost_per_core_hour = 0.02684125
                     n_standard += 1
-                else:
+                elif 4 <= memory_req < 7.5:
                     cost_per_core_hour = 0.02929425
                     n_highmem += 1
+                else:
+                    cost_per_core_hour = 0.02929425
+                    n_oom += 1
 
-                estimated_runtime_mins = 3 + ((7.5e-5 * (chunk.n_rare + chunk.n_common) * actual_batch_size) / cores)
+                estimated_runtime_mins = 3 + ((7.5e-6 * (chunk.n_rare + chunk.n_common) * actual_batch_size) / cores)
 
                 rough_cost += n_batches * cores * (estimated_runtime_mins / 60) * cost_per_core_hour
 
@@ -58,9 +62,9 @@ def estimate_resources(args: dict):
             rough_cost_per_sample = rough_cost / args['n_samples']
             mean_runtime = statistics.mean(runtimes)
 
-            results_table.append([cores, args['n_samples'], n_batches, min_runtime, max_runtime, mean_runtime, actual_batch_size, rough_cost, rough_cost_per_sample, n_lowmem, n_standard, n_highmem])
+            results_table.append([cores, args['n_samples'], n_batches, min_runtime, max_runtime, mean_runtime, actual_batch_size, rough_cost, rough_cost_per_sample, n_lowmem, n_standard, n_highmem, n_oom])
 
-    print(tabulate(results_table, headers=['cores', 'n_samples', 'n_batches', 'min_runtime', 'max_runtime', 'mean_runtime', 'batch_size', 'rough_cost_estimate', 'rough_cost_estimate_per_sample', 'n_lowmem', 'n_standard', 'n_highmem']))
+    print(tabulate(results_table, headers=['cores', 'n_samples', 'n_batches', 'min_runtime', 'max_runtime', 'mean_runtime', 'batch_size', 'rough_cost_estimate', 'rough_cost_estimate_per_sample', 'n_lowmem', 'n_standard', 'n_highmem', 'n_oom']))
 
 
 if __name__ == '__main__':

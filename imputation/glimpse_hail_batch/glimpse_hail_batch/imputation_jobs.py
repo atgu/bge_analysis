@@ -35,6 +35,7 @@ def phase(b: hb.Batch,
           crams_list: hb.ResourceFile,
           glimpse_remote_checkpoint_file: str,
           fasta: hb.ResourceGroup,
+          sample_ploidy_list: hb.ResourceFile,
           docker: str,
           cpu: int,
           memory: str,
@@ -82,6 +83,9 @@ def phase(b: hb.Batch,
         extra_args += f' --main {n_main}'
     if effective_population_size is not None:
         extra_args += f' --ne {effective_population_size}'
+
+    if chunk.is_non_par:
+        extra_args += f' --samples-file {sample_ploidy_list}'
 
     phase_cmd = f'''
 set -e
@@ -280,27 +284,48 @@ EOF
     return j
 
 
-def union_sample_groups(b: hb.Batch,
-                        mt_paths: hb.ResourceFile,
-                        output_path: str,
-                        docker: str,
-                        cpu: int,
-                        memory: str,
-                        storage: str,
-                        batch_name: str,
-                        billing_project: str,
-                        remote_tmpdir: str,
-                        regions: str,
-                        use_checkpoints: bool,
-                        n_partitions: int) -> Optional[Job]:
+def union_sample_groups_from_vcfs(b: hb.Batch,
+                                  vcf_paths: hb.ResourceFile,
+                                  output_path: str,
+                                  docker: str,
+                                  cpu: int,
+                                  memory: str,
+                                  storage: str,
+                                  billing_project: str,
+                                  remote_tmpdir: str,
+                                  regions: str,
+                                  use_checkpoints: bool,
+                                  contig: str,
+                                  batch_name: str,
+                                  sample_annotations: hb.ResourceFile,
+                                  sample_id_col: str,
+                                  group_by_ann_cols: List[str]) -> Optional[Job]:
     if use_checkpoints and hfs.exists(output_path):
         return None
 
-    j = b.new_bash_job(attributes={'name': 'union_sample_groups'})
+    j = b.new_bash_job(attributes={'name': f'union/{contig}'})
     j.cpu(cpu)
     j.image(docker)
     j.storage(storage)
     j.memory(memory)
+
+    fields = {sample_id_col, *group_by_ann_cols}
+    fields = ", ".join(f'"{col}"' for col in fields)
+
+    def info_by_ann(mt: str):
+        annotations = []
+        for ann in group_by_ann_cols:
+            annotations.append(f'''
+keys = pd_df["{ann}"].unique().tolist()
+for key in keys:
+    {mt} = {mt}.annotate_rows(info={mt}.info.annotate(**{{f"{ann}.{{key}}": hl.struct(INFO=hl.agg.filter(mt["{ann}"] == key, IMPUTE_INFO({mt})),
+                                                                                      AF=hl.agg.filter(mt["{ann}"] == key, AF({mt})))}}))
+''')
+        return '\n'.join(annotations)
+
+
+    def add_info_if_needed(mt):
+        return f'{mt} = {mt}.annotate_rows(info={mt}.info.annotate(INFO={mt}.info.get("INFO", hl.null(hl.tarray(hl.tfloat64)))))'
 
     cmd = f"""
 hailctl config set batch/billing_project "{billing_project}"
@@ -312,27 +337,35 @@ import hail as hl
 import hailtop.fs as hfs
 import os
 from typing import List
+import pandas as pd
 
-hl.init(backend='batch', app_name='{batch_name}-union-sample-groups', driver_cores=8, worker_cores=2)
+hl.init(backend='batch', app_name='{batch_name}-union-{contig}', driver_cores=2, worker_cores=1)
 
 paths = []
-with open("{mt_paths}", 'r') as f:
+sample_sizes = []
+with open("{vcf_paths}", 'r') as f:
     for line in f:
-        paths.append(line.rstrip("\\n"))
+        path, sample_size = line.rstrip("\\n").split('\\t')
+        paths.append(path)
+        sample_sizes.append(int(sample_size))
 
-mt_init = hl.read_matrix_table(paths[0])
-intervals = mt_init._calculate_new_partitions({n_partitions})
+pd_df = pd.read_csv("{sample_annotations}", sep="\\t", usecols=[{fields}], dtype=str)
+sample_ann = hl.Table.from_pandas(pd_df, "{sample_id_col}")
 
-mt_left = hl.read_matrix_table(paths[0], _intervals=intervals)
+mt_left = hl.import_vcf(paths[0], reference_genome="GRCh38")
+{add_info_if_needed('mt_left')}
+mt_left = mt_left.annotate_rows(info=mt_left.info.annotate(N=sample_sizes[0], AF=mt_left.info.AF[0], INFO=mt_left.info.INFO[0], RAF=mt_left.info.RAF[0]))
 mt_left = mt_left.annotate_rows(**{{"info_0": mt_left.info}})
 
-for path in paths[1:]:
-    mt_right = hl.read_matrix_table(path, _intervals=intervals)
+for idx, path in enumerate(paths[1:]):
+    mt_right = hl.import_vcf(path, reference_genome="GRCh38")
+    {add_info_if_needed('mt_right')}
+    mt_right = mt_right.annotate_rows(info=mt_right.info.annotate(N=sample_sizes[idx], AF=mt_right.info.AF[0], INFO=mt_right.info.INFO[0], RAF=mt_right.info.RAF[0]))
     mt_left = mt_left.union_cols(mt_right,
                                  drop_right_row_fields=False,
                                  row_join_type='outer')
 
-mt = mt_left
+mt = mt_left.annotate_cols(**sample_ann[mt_left.s])
 
 n_samples = mt.count_cols()
 n_batches = len(paths)
@@ -341,19 +374,56 @@ mt = mt.annotate_rows(info=mt.info.annotate(AF=hl.array([mt[f"info_{{i}}"].AF fo
 mt = mt.annotate_rows(info=mt.info.annotate(INFO=hl.array([mt[f"info_{{i}}"].INFO for i in range(n_batches)])))
 mt = mt.annotate_rows(info=mt.info.annotate(N=hl.array([mt[f"info_{{i}}"].N for i in range(n_batches)])))
 
+
+def N(mt):
+    return hl.agg.count_where(hl.is_defined(mt.GP))
+
+
+def e_i_j(mt):
+    return mt.GP[1] + 2 * mt.GP[2]
+
+
+def f_i_j(mt):
+    return mt.GP[1] + 4 * mt.GP[2]
+
+
+def theta_hat(mt):
+    return hl.agg.sum(e_i_j(mt)) / (2 * N(mt))
+
+
 def AF(mt):
-    return hl.sum(hl.map(lambda af, n: af * n, mt.info.AF, mt.info.N)) / n_samples
+    return hl.agg.sum(mt.GT.n_alt_alleles()) / (2 * N(mt))
+
     
-def INFO(mt):        
-    return 1 - hl.sum(hl.map(lambda af, n, info: (1 - info) * 2 * n * af * (1 - af), mt.info.AF, mt.info.N, mt.info.INFO)) / (2 * n_samples * AF(mt) * (1 - AF(mt)))
+def IMPUTE_INFO(mt):
+    return hl.if_else((theta_hat(mt) == 0) | (theta_hat(mt) == 1),
+                      1,
+                      1 - hl.agg.sum(f_i_j(mt) - e_i_j(mt) ** 2) / (2 * N(mt) * theta_hat(mt) * (1 - theta_hat(mt))))
 
-mt = mt.annotate_rows(info=mt.info.annotate(AF=AF(mt), INFO=hl.if_else((AF(mt) == 0) | (AF(mt) == 1), 1, INFO(mt))))
 
-mt = mt.annotate_rows(info=mt.info.drop('N'))
+def GLIMPSE_AF(mt):
+    return hl.sum(hl.map(lambda af, n: af * n, mt.info.AF, mt.info.N)) / n_samples
+
+
+def GLIMPSE_INFO(mt):
+    return hl.if_else((GLIMPSE_AF(mt) == 0) | (GLIMPSE_AF(mt) == 1),
+                      1,
+                      1 - hl.sum(hl.map(lambda af, n, info: (1 - info) * 2 * n * af * (1 - af), mt.info.AF, mt.info.N, mt.info.INFO)) / (2 * n_samples * GLIMPSE_AF(mt) * (1 - GLIMPSE_AF(mt))))
+
+
+mt = mt.annotate_rows(info=mt.info.annotate(glimpse=hl.struct(AF=GLIMPSE_AF(mt), INFO=GLIMPSE_INFO(mt)),
+                                            impute=hl.struct(AF=AF(mt), INFO=IMPUTE_INFO(mt))))
+{info_by_ann('mt')}
+
+mt = mt.annotate_rows(info=mt.info.drop('N', 'INFO', 'AF'))
 mt = mt.drop(*[f'info_{{i}}' for i in range(n_batches)])
 mt = mt.drop(*[f'rsid_{{i}}' for i in range(1, n_batches)])
 mt = mt.drop(*[f'qual_{{i}}' for i in range(1, n_batches)])
 mt = mt.drop(*[f'filters_{{i}}' for i in range(1, n_batches)])
+
+mt = mt.annotate_rows(info=mt.info.flatten())
+
+mt = mt.drop(*[{", ".join(f'"{col}"' for col in group_by_ann_cols)}])
 
 output_path = "{output_path}"
 
@@ -361,6 +431,7 @@ if output_path.endswith('.mt'):
     mt.write(output_path)
     mt_count = hl.read_matrix_table(output_path)
     print(mt_count.count())
+    print(mt.describe())
 else:
     assert output_path.endswith('.vcf.bgz')
     hl.export_vcf(mt, output_path, tabix=True)

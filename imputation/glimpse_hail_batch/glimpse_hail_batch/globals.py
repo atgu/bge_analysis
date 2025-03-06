@@ -17,7 +17,7 @@ async def file_exists(fs: RouterAsyncFS, path: str):
     return await fs.exists(path)
 
 
-Chunk = namedtuple('Chunk', ['chunk_contig', 'reference_contig', 'chunk_idx', 'n_common', 'n_rare', 'info_path', 'path', 'n_variants'])
+Chunk = namedtuple('Chunk', ['chunk_contig', 'reference_contig', 'chunk_idx', 'n_common', 'n_rare', 'info_path', 'path', 'n_variants', 'is_non_par'])
 
 
 def reference_file_dir_str(output_dir: str) -> str:
@@ -47,6 +47,7 @@ def find_chunks(reference_dir: Optional[str],
                 binary_reference_file_regex: re.Pattern,
                 chunk_file_regex: re.Pattern,
                 *,
+                non_par_contigs: Optional[List[str]] = None,
                 requested_contig: Optional[str] = None,
                 requested_chunk_index: Optional[int] = None,
                 requester_pays_config: Optional[str] = None
@@ -70,6 +71,8 @@ def find_chunks(reference_dir: Optional[str],
         with hfs.open(chunk_info_file.path, 'r', requester_pays_config=requester_pays_config) as f:
             chunks_df = pd.read_csv(io.StringIO(f.read()), sep="\t", names=chunk_manifest_header)
 
+        is_non_par = non_par_contigs and contig in non_par_contigs
+
         # Note: the contig in the file name can be different than the actual contig in the chunks file!
         for _, row in chunks_df.iterrows():
             chunks.append(Chunk(chunk_contig=contig,
@@ -79,7 +82,8 @@ def find_chunks(reference_dir: Optional[str],
                                 n_rare=row['n_variants'] - row['n_common'],
                                 info_path=chunk_info_file.path,
                                 path=reference_paths[(contig, row['chunk_idx'])],
-                                n_variants=row['n_variants']))
+                                n_variants=row['n_variants'],
+                                is_non_par=is_non_par))
 
     chunks.sort(key=lambda c: c.chunk_idx)
 
@@ -104,15 +108,16 @@ def rewrite_path(mount_path: str, path: str):
 class Sample:
     @staticmethod
     def from_json(d: dict) -> 'Sample':
-        return Sample(d['sample_id'], d['cram_path'], d['cram_index_path'])
+        return Sample(d['sample_id'], d['cram_path'], d['cram_index_path'], d['is_female'])
 
-    def __init__(self, sample_id: str, cram_path: str, cram_index_path: str):
+    def __init__(self, sample_id: str, cram_path: str, cram_index_path: str, is_female: bool):
         self.sample_id = sample_id
         self.cram_path = cram_path
         self.cram_index_path = cram_index_path
         self.cram_basename = os.path.basename(self.cram_path)
         self.cram_index_basename = os.path.basename(self.cram_index_path)
         self.uuid = uuid.uuid4().hex[:8]
+        self.is_female = is_female
 
     def remote_cram_path(self, cram_temp_dir: str) -> str:
         cram_temp_dir = cram_temp_dir.rstrip('/')
@@ -132,6 +137,10 @@ class Sample:
 
     def to_dict(self):
         return {'sample_id': self.sample_id, 'cram_path': self.cram_path, 'cram_index_path': self.cram_index_path}
+
+    @property
+    def ploidy(self):
+        return 2 if self.is_female else 1
 
 
 class SampleGroup:
@@ -164,6 +173,10 @@ class SampleGroup:
         }
 
     @property
+    def n_samples(self):
+        return len(self.samples)
+
+    @property
     def temp_dir(self):
         return f'{self._output_dir}/sg-{self.sample_group_index}'
 
@@ -174,6 +187,10 @@ class SampleGroup:
     @property
     def cram_list_output_file(self):
         return f'{self.temp_dir}/phase/crams.list'
+
+    @property
+    def sample_ploidy_list(self):
+        return f'{self.temp_dir}/sample_ploidy.list'
 
     def cram_list_gcloud_output_file(self, start: int, end: int):
         return f'{self.temp_dir}/copy-crams/{start}-{end}/gcloud_crams.list'
@@ -261,6 +278,12 @@ class SampleGroup:
                 f.write(f'{cram}##idx##{cram_idx} {sample_id}\n')
         return self.cram_list_output_file
 
+    def write_sample_ploidy_list(self) -> str:
+        with hfs.open(self.sample_ploidy_list, 'w') as f:
+            for sample in self.samples:
+                f.write(f'{sample.sample_id}\t{sample.ploidy}\n')
+        return self.sample_ploidy_list
+
     def write_gcloud_cram_copy_list(self, start: int, end: int) -> str:
         src_files = self.original_crams[start:end] + self.original_cram_indices[start:end]
         output_file = self.cram_list_gcloud_output_file(start, end)
@@ -278,14 +301,28 @@ class SampleGroup:
         return f'sample-group-{self.sample_group_index}'
 
 
-def find_crams(sample_manifest: str, sample_id_col: str, cram_path_col: str, cram_index_path_col: str, n_samples: Optional[int]) -> List[Sample]:
+def find_crams(sample_manifest: str,
+               sample_id_col: str,
+               cram_path_col: str,
+               cram_index_path_col: str,
+               sex_col: Optional[str],
+               female_code: Optional[str],
+               n_samples: Optional[int]) -> List[Sample]:
     with hfs.open(sample_manifest, 'r') as f:
         manifest = pd.read_csv(io.StringIO(f.read()), sep='\t')
+
     sample_ids = manifest[sample_id_col].to_list()
     cram_paths = manifest[cram_path_col].to_list()
     cram_index_paths = manifest[cram_index_path_col].to_list()
 
-    samples = [Sample(sample_id, cram, cram_index) for sample_id, cram, cram_index in zip(sample_ids, cram_paths, cram_index_paths)]
+    if sex_col is not None:
+        is_females = [sex == female_code for sex in manifest[sex_col].to_list()]
+    else:
+        is_females = [True] * len(sample_ids)
+
+    samples = [Sample(sample_id, cram, cram_index, is_female)
+               for sample_id, cram, cram_index, is_female in zip(sample_ids, cram_paths, cram_index_paths, is_females)]
+
     if n_samples is not None:
         samples = samples[:n_samples]
 

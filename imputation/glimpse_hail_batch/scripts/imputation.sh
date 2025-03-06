@@ -12,18 +12,18 @@ SAMPLE_GROUP_SIZE=300
 PHASE_CPU=16
 
 SAMPLE_MANIFEST="/Users/jigold/Downloads/gcp_pumas_scz.sample_manifest.tsv"
-STAGING_REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/staging/test_10/"
+STAGING_REMOTE_TMPDIR="gs://jigold-batch-tmp-ezxyx/staging/test_10_group_by/"
 
 FASTA="gs://jigold-batch-tmp-ezxyx/fasta/Homo_sapiens_assembly38.fasta"
 
-OUTPUT_FILE="gs://jigold-batch-tmp-ezxyx/glimpse-outputs/test_10.mt"
+OUTPUT_FILE="gs://jigold-batch-tmp-ezxyx/glimpse-outputs/test_10_group_by.mt"
 
 
 python3 -m glimpse_hail_batch.imputation \
     --billing-project $BILLING_PROJECT \
     --batch-remote-tmpdir $REMOTE_TMPDIR \
     --batch-regions "us-central1" \
-    --batch-name "glimpse-test-50" \
+    --batch-name "glimpse-test-group-by" \
     --docker-hail "hailgenetics/hail:0.2.133" \
     --docker-glimpse "us-central1-docker.pkg.dev/neale-pumas-bge/glimpse2/glimpse2-gcloud:odelaneau_bd93ade" \
     --fasta $FASTA \
