@@ -8,7 +8,7 @@ BILLING_PROJECT="neale-pumas-bge"
 
 CHUNK_INFO_DIR="gs://jigold-batch-tmp-ezxyx/test-regenerate-chunks/"
 BINARY_REFERENCE_DIR="gs://bge-dragen-imputation/hgdp1kg/binary_reference/"
-FILE_REGEX="ref_chunk_(?P<contig>.*)_(?P<chunk_index>\d+).bin"
+FILE_REGEX="ref_chunk_(?P<contig>.+)_(?P<chunk_index>\d+).bin"
 CHUNK_FILE_REGEX="chunks_(?P<contig>.+)\.txt"
 
 #CHUNK_INFO_DIR="gs://jigold-batch-tmp-ezxyx/chunk_info/"

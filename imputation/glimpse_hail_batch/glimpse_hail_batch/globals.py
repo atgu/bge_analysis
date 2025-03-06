@@ -39,14 +39,6 @@ def reference_file_str() -> str:
     return f'ref_chunk_${{CONTIG}}_${{CHUNKINDEX}}'
 
 
-def parse_chunk_path(path: str) -> str:
-    ext = '.txt'
-    file = os.path.basename(path)
-    segments = file.replace(ext, '').split('_')
-    contig = '_'.join(segments[1:])
-    return contig
-
-
 chunk_manifest_header = ['chunk_idx', 'contig', 'buffered_region', 'actual_region', 'cm_dummy', 'mb_dummy', 'n_variants', 'n_common']
 
 
@@ -211,8 +203,13 @@ class SampleGroup:
     def phased_glimpse_checkpoint_file(self, contig: str, chunk_index: int):
         return f'{self.temp_dir}/phase/{contig}/chunk-{chunk_index}/glimpse_checkpoint'
 
-    async def initialize_phased_glimpse_checkpoint_file(self, fs: RouterAsyncFS, contig: str, chunk_index: int) -> str:
+    async def initialize_phased_glimpse_checkpoint_file(self, fs: RouterAsyncFS, contig: str, chunk_index: int, use_checkpoints: bool) -> str:
         path = self.phased_glimpse_checkpoint_file(contig, chunk_index)
+
+        checkpoint_exists = await file_exists(fs, path)
+        if use_checkpoints and checkpoint_exists:
+            return path
+
         async with await fs.create(path) as f:
             await f.write(b"")
         return path

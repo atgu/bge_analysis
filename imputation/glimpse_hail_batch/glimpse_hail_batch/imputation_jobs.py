@@ -51,9 +51,9 @@ def phase(b: hb.Batch,
     if use_checkpoint and phase_file_exists:
        return None
 
-    j = b.new_bash_job(name=f'phase/sample-group-{sample_group_index}/{chunk.contig}/{chunk.chunk_idx}',
+    j = b.new_bash_job(name=f'phase/sample-group-{sample_group_index}/{chunk.chunk_contig}/{chunk.chunk_idx}',
                        attributes={'sample-group-index': str(sample_group_index),
-                                   'contig': str(chunk.contig),
+                                   'contig': str(chunk.chunk_contig),
                                    'chunk-index': str(chunk.chunk_idx),
                                    'task': 'phase'})
 
@@ -84,7 +84,7 @@ def phase(b: hb.Batch,
         extra_args += f' --ne {effective_population_size}'
 
     phase_cmd = f'''
-set +e
+set -e
 
 while true; do
   gcloud storage cp checkpoint.bin {glimpse_remote_checkpoint_file} || true;
@@ -156,10 +156,10 @@ def ligate(b: hb.Batch,
     if memory == "lowmem":
         memory_ratio = 0.5
     elif memory == "standard":
-        memory_ratio = 3
+        memory_ratio = 2.75
     else:
         assert memory == "highmem"
-        memory_ratio = 7
+        memory_ratio = 6.5
 
     chunk_files_str = '\n'.join([str(chunk.bcf) for chunk in chunk_outputs])
 
@@ -345,12 +345,15 @@ def AF(mt):
     return hl.sum(hl.map(lambda af, n: af * n, mt.info.AF, mt.info.N)) / n_samples
     
 def INFO(mt):        
-    return hl.sum(hl.map(lambda af, n, info: (1 - info) * 2 * n * af * (1 - af), mt.info.AF, mt.info.N, mt.info.INFO)) / (2 * n_samples * AF(mt) * (1 - AF(mt)))
+    return 1 - hl.sum(hl.map(lambda af, n, info: (1 - info) * 2 * n * af * (1 - af), mt.info.AF, mt.info.N, mt.info.INFO)) / (2 * n_samples * AF(mt) * (1 - AF(mt)))
 
 mt = mt.annotate_rows(info=mt.info.annotate(AF=AF(mt), INFO=hl.if_else((AF(mt) == 0) | (AF(mt) == 1), 1, INFO(mt))))
 
 mt = mt.annotate_rows(info=mt.info.drop('N'))
 mt = mt.drop(*[f'info_{{i}}' for i in range(n_batches)])
+mt = mt.drop(*[f'rsid_{{i}}' for i in range(1, n_batches)])
+mt = mt.drop(*[f'qual_{{i}}' for i in range(1, n_batches)])
+mt = mt.drop(*[f'filters_{{i}}' for i in range(1, n_batches)])
 
 output_path = "{output_path}"
 

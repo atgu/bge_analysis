@@ -6,6 +6,7 @@ import re
 from functools import partial
 
 import hailtop.batch as hb
+from hailtop.batch.job import Job
 import hailtop.fs as hfs
 from hailtop.aiotools.router_fs import RouterAsyncFS
 from hailtop.utils import bounded_gather
@@ -26,8 +27,8 @@ async def run_sample_group(b: hb.Batch,
                            fasta_input: hb.ResourceGroup,
                            ref_dict: hb.ResourceFile,
                            samples_per_copy_group: int,
-                           prev_copy_cram_jobs: List[hb.Job],
-                           fs: RouterAsyncFS) -> Tuple[List[hb.Job], Optional[hb.Job]]:
+                           prev_copy_cram_jobs: List[Job],
+                           fs: RouterAsyncFS) -> Tuple[List[Job], Optional[Job]]:
     print(f'staging sample group {sample_group.sample_group_index}')
 
     sample_group.write_sample_group_dict()
@@ -84,7 +85,7 @@ async def run_sample_group(b: hb.Batch,
         crams_list = sample_group.write_cram_list()
         crams_list_input = b.read_input(crams_list)
 
-        phase_checkpoint_files = await bounded_gather(*[partial(sample_group.initialize_phased_glimpse_checkpoint_file, fs, contig, chunk.chunk_idx)
+        phase_checkpoint_files = await bounded_gather(*[partial(sample_group.initialize_phased_glimpse_checkpoint_file, fs, contig, chunk.chunk_idx, args['use_checkpoints'])
                                                         for contig, chunks in contig_chunks.items()
                                                         for chunk in chunks],
                                                       cancel_on_error=True)
@@ -129,7 +130,7 @@ async def run_sample_group(b: hb.Batch,
             phased_inputs = [b.read_input_group(bcf=file + '.bcf', csi=file + '.bcf.csi')
                              for file in phased_output_files[contig]]
 
-            ligate_storage_required = args['ligate_storage'] or get_ligate_storage_requirement(50, len(sample_group.samples), n_variants_contig[contig])
+            ligate_storage_required = args['ligate_storage'] or get_ligate_storage_requirement(10 + (len(sample_group.samples) + 10) // 10, len(sample_group.samples), n_variants_contig[contig])
 
             ligate_j = ligate(b,
                               sample_group,
