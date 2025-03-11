@@ -4,17 +4,23 @@ import hailtop.batch as hb
 from hailtop.batch.job import Job
 import hailtop.fs as hfs
 
-from .globals import Chunk, SampleGroup, get_bucket
+from ..globals import Chunk, SampleGroup, get_bucket
 
 
-def copy_temp_crams_job(b: hb.Batch, sample_group: SampleGroup, start: int, end: int, cpu: int, memory: str) -> Job:
+def copy_temp_crams_job(b: hb.Batch,
+                        jg: hb.JobGroup,
+                        sample_group: SampleGroup,
+                        start: int,
+                        end: int,
+                        cpu: int,
+                        memory: str) -> Job:
     # this job is idempotent because we use the -n or no-clobber option
 
     copy_list = sample_group.write_gcloud_cram_copy_list(start, end)
     copy_list_input = b.read_input(copy_list)
 
-    j = b.new_bash_job(name=f'copy/sample-group-{sample_group.sample_group_index}/{start}-{end}',
-                       attributes={'task': 'copy'})
+    j = jg.new_bash_job(name=f'copy/sample-group-{sample_group.sample_group_index}/{start}-{end}',
+                        attributes={'task': 'copy'})
     j.image('google/cloud-sdk:512.0.0-slim')
 
     copy = f'cat {copy_list_input} | gcloud storage cp -n -I {sample_group.remote_cram_temp_dir}'
@@ -26,6 +32,7 @@ def copy_temp_crams_job(b: hb.Batch, sample_group: SampleGroup, start: int, end:
 
 
 def phase(b: hb.Batch,
+          jg: hb.JobGroup,
           output_file: str,
           phase_file_exists: bool,
           sample_group: SampleGroup,
@@ -50,13 +57,13 @@ def phase(b: hb.Batch,
     glimpse_checkpoint_file_input = b.read_input(glimpse_remote_checkpoint_file)
 
     if use_checkpoint and phase_file_exists:
-       return None
+        return None
 
-    j = b.new_bash_job(name=f'phase/sample-group-{sample_group_index}/{chunk.chunk_contig}/{chunk.chunk_idx}',
-                       attributes={'sample-group-index': str(sample_group_index),
-                                   'contig': str(chunk.chunk_contig),
-                                   'chunk-index': str(chunk.chunk_idx),
-                                   'task': 'phase'})
+    j = jg.new_bash_job(name=f'phase/sample-group-{sample_group_index}/{chunk.chunk_contig}/{chunk.chunk_idx}',
+                        attributes={'sample-group-index': str(sample_group_index),
+                                    'contig': str(chunk.chunk_contig),
+                                    'chunk-index': str(chunk.chunk_idx),
+                                    'task': 'phase'})
 
     j.image(docker)
     j.storage('20Gi')
@@ -133,6 +140,7 @@ touch {j.phased.coverage_metrics}
 
 
 def ligate(b: hb.Batch,
+           jg: hb.JobGroup,
            sample_group: SampleGroup,
            contig: str,
            docker: str,
@@ -144,10 +152,10 @@ def ligate(b: hb.Batch,
            ref_dict: hb.ResourceFile,
            use_checkpoint: bool) -> Optional[Job]:
     if use_checkpoint and hfs.exists(output_file + '.vcf.bgz'):
-       return None
+        return None
 
-    j = b.new_bash_job(name=f'ligate/sample-group-{sample_group.sample_group_index}/{contig}',
-                       attributes={'task': 'ligate'})
+    j = jg.new_bash_job(name=f'ligate/sample-group-{sample_group.sample_group_index}/{contig}',
+                        attributes={'task': 'ligate'})
     j.image(docker)
     j.cpu(cpu)
     j.memory(memory)
@@ -156,14 +164,6 @@ def ligate(b: hb.Batch,
     j.declare_resource_group(ligated={'vcf': '{root}.vcf.gz',
                                       'tbi': '{root}.vcf.gz.tbi',
                                       'md5sum': '{root}.md5sum'})
-
-    if memory == "lowmem":
-        memory_ratio = 0.5
-    elif memory == "standard":
-        memory_ratio = 2.75
-    else:
-        assert memory == "highmem"
-        memory_ratio = 6.5
 
     chunk_files_str = '\n'.join([str(chunk.bcf) for chunk in chunk_outputs])
 
@@ -185,10 +185,7 @@ sh touch.sh
 # Set correct reference dictionary
 bcftools view -h --no-version ligated.vcf.gz > old_header.vcf        
 java -jar /picard.jar UpdateVcfSequenceDictionary -I old_header.vcf --SD {ref_dict} -O new_header.vcf        
-bcftools reheader -h new_header.vcf -o updated_ligated.vcf.gz ligated.vcf.gz
-
-mkdir /io/temp-sort/
-bcftools sort -m {memory_ratio * cpu}G -O z -o {j.ligated.vcf} -T /io/temp-sort/ updated_ligated.vcf.gz
+bcftools reheader -h new_header.vcf -o {j.ligated.vcf} ligated.vcf.gz
 
 tabix {j.ligated.vcf}
 md5sum {j.ligated.vcf} | awk '{{ print $1 }}' > {j.ligated.md5sum}
@@ -205,10 +202,11 @@ touch {j.ligated.tbi}  # this is a dummy operation; todo to figure out why this 
 
 
 def delete_temp_files_job(b: hb.Batch,
+                          jg: hb.JobGroup,
                           sample_group: SampleGroup,
                           save_checkpoints: bool) -> Job:
-    j = b.new_bash_job(attributes={'name': f'delete/sample-group-{sample_group.sample_group_index}',
-                                   'task': 'delete'})
+    j = jg.new_bash_job(attributes={'name': f'delete/sample-group-{sample_group.sample_group_index}',
+                                    'task': 'delete'})
     j.cpu(1)
     j.image('google/cloud-sdk:512.0.0-slim')
 
@@ -228,49 +226,9 @@ def delete_temp_files_job(b: hb.Batch,
     return j
 
 
-def merge_vcfs(b: hb.Batch,
-               sample_group: SampleGroup,
-               file_path_regex: str,
-               output_path: str,
-               docker: str,
-               cpu: int,
-               memory: str,
-               storage: str,
-               use_checkpoint: bool) -> Optional[Job]:
-    if use_checkpoint and hfs.exists(output_path + '/_SUCCESS'):
-        return None
-
-    j = b.new_bash_job(attributes={'name': f'merge-vcfs/sample-group-{sample_group.sample_group_index}',
-                                   'task': 'merge-vcfs'})
-    j.cpu(cpu)
-    j.image(docker)
-    j.storage(storage)
-    j.memory(memory)
-
-    j.command(f'''
-python3 << EOF
-import hail as hl
-import hailtop.fs as hfs
-
-hl.init(backend="spark", 
-        local="local[{cpu}]",
-        default_reference="GRCh38",
-        tmp_dir="/io/",
-        local_tmpdir="/io/",
-        spark_conf={{"spark.executor.memory": "7g", "spark.driver.memory": "7g", "spark.driver.maxResultSize": "7g"}})
-
-mt = hl.import_vcf("{file_path_regex}")
-mt = mt.annotate_rows(info=mt.info.annotate(N={len(sample_group.samples)}, AF=mt.info.AF[0], INFO=mt.info.INFO[0], RAF=mt.info.RAF[0]))
-mt.write("{output_path}", overwrite=True)
-EOF
-''')
-
-    return j
-
-
-def write_success(b: hb.Batch, sample_group: SampleGroup, docker: str) -> Job:
-    j = b.new_bash_job(attributes={'name': f'write-success/sample-group-{sample_group.sample_group_index}',
-                                   'task': 'write-success'})
+def write_success(b: hb.Batch, jg: hb.JobGroup, sample_group: SampleGroup, docker: str) -> Job:
+    j = jg.new_bash_job(attributes={'name': f'write-success/sample-group-{sample_group.sample_group_index}',
+                                    'task': 'write-success'})
     j.cpu(1)
     j.image(docker)
     j.command(f'''
@@ -285,6 +243,7 @@ EOF
 
 
 def union_sample_groups_from_vcfs(b: hb.Batch,
+                                  jg: hb.JobGroup,
                                   vcf_paths: hb.ResourceFile,
                                   output_path: str,
                                   docker: str,
@@ -295,37 +254,24 @@ def union_sample_groups_from_vcfs(b: hb.Batch,
                                   remote_tmpdir: str,
                                   regions: str,
                                   use_checkpoints: bool,
-                                  contig: str,
-                                  batch_name: str,
-                                  sample_annotations: hb.ResourceFile,
-                                  sample_id_col: str,
-                                  group_by_ann_cols: List[str]) -> Optional[Job]:
-    if use_checkpoints and hfs.exists(output_path):
-        return None
+                                  contig: str) -> Optional[Job]:
+    if use_checkpoints:
+        if output_path.endswith('.vcf.bgz') and hfs.exists(output_path):
+            return None
+        if output_path.endswith('.mt') and hfs.exists(output_path + '/_SUCCESS'):
+            return None
 
-    if output_path.endswith(".vcf.bgz") and group_by_ann_cols:
-        raise Exception(f"cannot export a VCF file with nested annotations specified by group_by_ann_cols {group_by_ann_cols}")
-
-    j = b.new_bash_job(attributes={'name': f'union/{contig}'})
+    j = jg.new_bash_job(attributes={'name': f'union/{contig}'})
     j.cpu(cpu)
     j.image(docker)
     j.storage(storage)
     j.memory(memory)
-
-    fields = {sample_id_col, *group_by_ann_cols}
-    fields = ", ".join(f'"{col}"' for col in fields)
-
-    def info_by_ann(mt: str):
-        annotations = []
-        for ann in group_by_ann_cols:
-            annotations.append(f'''
-{mt} = {mt}.annotate_rows(info={mt}.info.annotate(**{{"{ann}": hl.agg.group_by({mt}["{ann}"], hl.struct(INFO=IMPUTE_INFO({mt}), AF=AF({mt})))}}))
-''')
-        return '\n'.join(annotations)
+    j.spot(False)
 
 
     def add_info_if_needed(mt):
         return f'{mt} = {mt}.annotate_rows(info={mt}.info.annotate(INFO={mt}.info.get("INFO", hl.null(hl.tarray(hl.tfloat64)))))'
+
 
     cmd = f"""
 hailctl config set batch/billing_project "{billing_project}"
@@ -339,7 +285,9 @@ import os
 from typing import List
 import pandas as pd
 
-hl.init(backend='batch', app_name='{batch_name}-union-{contig}', driver_cores=4, worker_cores=1)
+batch_id = int(os.environ['HAIL_BATCH_ID'])
+
+hl.init(backend="batch", app_name="union-{contig}", batch_id=batch_id)
 
 paths = []
 sample_sizes = []
@@ -348,9 +296,6 @@ with open("{vcf_paths}", 'r') as f:
         path, sample_size = line.rstrip("\\n").split('\\t')
         paths.append(path)
         sample_sizes.append(int(sample_size))
-
-pd_df = pd.read_csv("{sample_annotations}", sep="\\t", usecols=[{fields}], dtype=str)
-sample_ann = hl.Table.from_pandas(pd_df, "{sample_id_col}")
 
 mt_left = hl.import_vcf(paths[0], reference_genome="GRCh38")
 {add_info_if_needed('mt_left')}
@@ -365,7 +310,7 @@ for idx, path in enumerate(paths[1:]):
                                  drop_right_row_fields=False,
                                  row_join_type='outer')
 
-mt = mt_left.annotate_cols(**sample_ann[mt_left.s])
+mt = mt_left
 
 n_samples = mt.count_cols()
 n_batches = len(paths)
@@ -373,32 +318,6 @@ n_batches = len(paths)
 mt = mt.annotate_rows(info=mt.info.annotate(AF=hl.array([mt[f"info_{{i}}"].AF for i in range(n_batches)])))
 mt = mt.annotate_rows(info=mt.info.annotate(INFO=hl.array([mt[f"info_{{i}}"].INFO for i in range(n_batches)])))
 mt = mt.annotate_rows(info=mt.info.annotate(N=hl.array([mt[f"info_{{i}}"].N for i in range(n_batches)])))
-
-
-def N(mt):
-    return hl.agg.count_where(hl.is_defined(mt.GP))
-
-
-def e_i_j(mt):
-    return mt.GP[1] + 2 * mt.GP[2]
-
-
-def f_i_j(mt):
-    return mt.GP[1] + 4 * mt.GP[2]
-
-
-def theta_hat(mt):
-    return hl.agg.sum(e_i_j(mt)) / (2 * N(mt))
-
-
-def AF(mt):
-    return hl.agg.sum(mt.GT.n_alt_alleles()) / (2 * N(mt))
-
-    
-def IMPUTE_INFO(mt):
-    return hl.if_else((theta_hat(mt) == 0) | (theta_hat(mt) == 1),
-                      1,
-                      1 - hl.agg.sum(f_i_j(mt) - e_i_j(mt) ** 2) / (2 * N(mt) * theta_hat(mt) * (1 - theta_hat(mt))))
 
 
 def GLIMPSE_AF(mt):
@@ -411,11 +330,9 @@ def GLIMPSE_INFO(mt):
                       1 - hl.sum(hl.map(lambda af, n, info: (1 - info) * 2 * n * af * (1 - af), mt.info.AF, mt.info.N, mt.info.INFO)) / (2 * n_samples * GLIMPSE_AF(mt) * (1 - GLIMPSE_AF(mt))))
 
 
-mt = mt.annotate_rows(info=mt.info.annotate(glimpse=hl.struct(AF=GLIMPSE_AF(mt), INFO=GLIMPSE_INFO(mt)),
-                                            impute=hl.struct(AF=AF(mt), INFO=IMPUTE_INFO(mt))))
-{info_by_ann('mt')}
+mt = mt.annotate_rows(info=mt.info.annotate(AF=GLIMPSE_AF(mt), INFO=GLIMPSE_INFO(mt)))
 
-mt = mt.annotate_rows(info=mt.info.drop('N', 'INFO', 'AF'))
+mt = mt.annotate_rows(info=mt.info.drop('N'))
 mt = mt.drop(*[f'info_{{i}}' for i in range(n_batches)])
 mt = mt.drop(*[f'rsid_{{i}}' for i in range(1, n_batches)])
 mt = mt.drop(*[f'qual_{{i}}' for i in range(1, n_batches)])

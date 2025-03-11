@@ -136,7 +136,7 @@ class Sample:
         return rewrite_path(mount_path, remote_crai_path)
 
     def to_dict(self):
-        return {'sample_id': self.sample_id, 'cram_path': self.cram_path, 'cram_index_path': self.cram_index_path}
+        return {'sample_id': self.sample_id, 'cram_path': self.cram_path, 'cram_index_path': self.cram_index_path, 'is_female': self.is_female}
 
     @property
     def ploidy(self):
@@ -218,7 +218,7 @@ class SampleGroup:
         return f'{self.temp_dir}/coverage_metrics.txt.gz'
 
     def phased_glimpse_checkpoint_file(self, contig: str, chunk_index: int):
-        return f'{self.temp_dir}/phase/{contig}/chunk-{chunk_index}/glimpse_checkpoint'
+        return f'{self.temp_dir}/phase/{contig}/chunk-{chunk_index}_glimpse.checkpoint'
 
     async def initialize_phased_glimpse_checkpoint_file(self, fs: RouterAsyncFS, contig: str, chunk_index: int, use_checkpoints: bool) -> str:
         path = self.phased_glimpse_checkpoint_file(contig, chunk_index)

@@ -1,9 +1,12 @@
-import argparse
 import asyncio
+import base64
 from collections import defaultdict
 import json
+
 from jinja2 import Environment, StrictUndefined
+import os
 import re
+import sys
 from functools import partial
 
 import hailtop.batch as hb
@@ -14,10 +17,10 @@ from hailtop.utils import bounded_gather
 
 from typing import Dict, List, Optional, Tuple
 
-from .imputation_jobs import (
+from .jobs import (
     copy_temp_crams_job, delete_temp_files_job, ligate, phase, union_sample_groups_from_vcfs, write_success
 )
-from .globals import Chunk, SampleGroup, file_exists, find_crams, find_chunks, get_ligate_storage_requirement, split_samples_into_groups
+from ..globals import Chunk, SampleGroup, file_exists, find_crams, find_chunks, get_ligate_storage_requirement, split_samples_into_groups
 
 
 env = Environment(undefined=StrictUndefined)
@@ -34,6 +37,10 @@ async def run_sample_group(b: hb.Batch,
                            fs: RouterAsyncFS) -> Tuple[List[Job], Optional[Job]]:
     print(f'staging sample group {sample_group.name}')
 
+    jg = b.create_job_group(attributes={'name': sample_group.name})
+    phasing_jg = jg.create_job_group(attributes={'name': f'{sample_group.name}/phase'})
+    ligate_jg = jg.create_job_group(attributes={'name': f'{sample_group.name}/ligate'})
+
     sample_group.write_sample_group_dict()
     sample_group.write_sample_ploidy_list()
 
@@ -47,9 +54,9 @@ async def run_sample_group(b: hb.Batch,
     phasing_already_completed = [False for contig, chunks in contig_chunks.items() for _ in chunks]
 
     if args['use_checkpoints']:
-        phasing_already_completed = await bounded_gather(*[partial(file_exists, fs, phased_output_files[contig][chunk.chunk_idx] + '.bcf')
+        phasing_already_completed = await bounded_gather(*[partial(file_exists, fs, phased_output_files[contig][chunk_idx] + '.bcf')
                                                                 for contig, chunks in contig_chunks.items()
-                                                                for chunk in chunks],
+                                                                for chunk_idx, chunk in enumerate(chunks)],
                                                                 cancel_on_error=True)
 
         is_phasing_complete = all(phasing_already_completed)
@@ -67,6 +74,7 @@ async def run_sample_group(b: hb.Batch,
             # jobs. By making the jobs the same size, they will be scheduled in subsequent
             # order.
             copy_j = copy_temp_crams_job(b,
+                                         jg,
                                          sample_group,
                                          idx,
                                          idx + samples_per_copy_group,
@@ -104,6 +112,7 @@ async def run_sample_group(b: hb.Batch,
                 phase_checkpoint_file = phase_checkpoint_files[global_chunk_idx]
 
                 phase_j = phase(b,
+                                phasing_jg,
                                 phased_output_file,
                                 phase_exists,
                                 sample_group,
@@ -137,9 +146,10 @@ async def run_sample_group(b: hb.Batch,
             phased_inputs = [b.read_input_group(bcf=file + '.bcf', csi=file + '.bcf.csi')
                              for file in phased_output_files[contig]]
 
-            ligate_storage_required = args['ligate_storage'] or get_ligate_storage_requirement(10 + (len(sample_group.samples) + 10) // 10, len(sample_group.samples), n_variants_contig[contig])
+            ligate_storage_required = args['ligate_storage'] or get_ligate_storage_requirement(10, len(sample_group.samples), n_variants_contig[contig])
 
             ligate_j = ligate(b,
+                              ligate_jg,
                               sample_group,
                               contig,
                               args['docker_glimpse'],
@@ -157,12 +167,12 @@ async def run_sample_group(b: hb.Batch,
 
     success_j = None
     if not args['use_checkpoints'] or not hfs.exists(sample_group.success_file):
-        success_j = write_success(b, sample_group, args['docker_hail'])
+        success_j = write_success(b, jg, sample_group, args['docker_hail'])
         success_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs))
 
     if args['always_delete_temp_files'] or success_j is not None:
         delete_jobs = []
-        delete_j = delete_temp_files_job(b, sample_group, args['save_checkpoints'])
+        delete_j = delete_temp_files_job(b, jg, sample_group, args['save_checkpoints'])
         delete_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs))
         delete_j.always_run(True)
         delete_jobs.append(delete_j)
@@ -177,10 +187,6 @@ async def impute(args: dict):
     with hfs.open(args['staging_remote_tmpdir'].rstrip('/') + '/config.json', 'w') as f:
         f.write(json.dumps(args, indent=4) + '\n')
 
-    non_par_contigs = args['non_par_contigs']
-    if non_par_contigs is not None:
-        non_par_contigs = args['non_par_contigs'].split(',')
-
     batch_regions = args['batch_regions']
     if batch_regions is not None:
         batch_regions = batch_regions.split(',')
@@ -192,8 +198,9 @@ async def impute(args: dict):
                                 regions=batch_regions,
                                 gcs_requester_pays_configuration=args['gcs_requester_pays_configuration'])
 
-    if args['batch_id'] is not None:
-        b = hb.Batch.from_batch_id(args['batch_id'],
+    batch_id = args['batch_id'] or os.environ.get('HAIL_BATCH_ID')
+    if batch_id is not None:
+        b = hb.Batch.from_batch_id(int(batch_id),
                                    backend=backend,
                                    requester_pays_project=args['gcs_requester_pays_configuration'])
     else:
@@ -218,6 +225,12 @@ async def impute(args: dict):
     if args['sample_group_index'] is not None:
         sample_groups = [sg for sg in sample_groups if sg.sample_group_index == args['sample_group_index']]
         assert sample_groups
+
+    non_par_contigs = args['non_par_contigs']
+    if non_par_contigs is None:
+        non_par_contigs = []
+    else:
+        non_par_contigs = non_par_contigs.split(',')
 
     chunks = find_chunks(args['reference_dir'],
                          args['chunk_info_dir'],
@@ -253,7 +266,12 @@ async def impute(args: dict):
         if success_j is not None:
             success_jobs.append(success_j)
 
+    union_sample_groups_jg = b.create_job_group(attributes={'name': 'union-sample-groups'})
+
     for contig in contig_chunks.keys():
+        union_contig_jg = union_sample_groups_jg.create_job_group(attributes={'name': f'union-sample-groups/{contig}',
+                                                                              'contig': contig})
+
         sample_group_vcfs = [sample_group.ligate_output_file_root(contig) + '.vcf.bgz' for sample_group in sample_groups]
         sample_group_sizes = [sample_group.n_samples for sample_group in sample_groups]
 
@@ -264,11 +282,8 @@ async def impute(args: dict):
 
         output_file = env.from_string(args['output_file']).render(contig=contig)
 
-        remote_sample_manifest = args['staging_remote_tmpdir'].rstrip('/') + '/sample_manifest.tsv'
-        hfs.copy(args['sample_manifest'], remote_sample_manifest)
-        sample_annotations = b.read_input(remote_sample_manifest)
-
         union_j = union_sample_groups_from_vcfs(b,
+                                                union_contig_jg,
                                                 b.read_input(union_sample_groups_inputs_path),
                                                 output_file,
                                                 args['docker_hail'],
@@ -279,92 +294,19 @@ async def impute(args: dict):
                                                 args['batch_remote_tmpdir'],
                                                 batch_regions,
                                                 args['use_checkpoints'],
-                                                contig,
-                                                batch_name,
-                                                sample_annotations,
-                                                args['sample_id_col'],
-                                                args['group_by_ann_col'])
+                                                contig)
 
         if union_j is not None:
             union_j.depends_on(*success_jobs)
 
-    b.run(disable_progress_bar=False)
+    b.run(wait=False, disable_progress_bar=True)
 
     backend.close()
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+    arguments_b64_str = base64.b64decode(sys.argv[1])
+    args = json.loads(arguments_b64_str)
 
-    parser.add_argument('--billing-project', type=str, required=False)
-    parser.add_argument('--batch-remote-tmpdir', type=str, required=False)
-    parser.add_argument('--batch-regions', type=str, default="us-central1")
-    parser.add_argument('--batch-name', type=str, default='glimpse2-imputation')
-    parser.add_argument('--batch-id', type=int, required=False)
-
-    parser.add_argument('--seed', type=int, required=False, default=2423413432)
-
-    parser.add_argument('--docker-glimpse', type=str, required=True)
-    parser.add_argument('--docker-hail', type=str, required=True)
-
-    parser.add_argument("--reference-dir", type=str, required=True)
-    parser.add_argument("--chunk-info-dir", type=str, required=True)
-    parser.add_argument('--binary-reference-file-regex', type=str, required=True)
-    parser.add_argument('--chunk-file-regex', type=str, required=True)
-
-    parser.add_argument('--sample-manifest', type=str, required=True)
-    parser.add_argument('--sample-id-col', type=str, required=True)
-    parser.add_argument('--cram-path-col', type=str, required=True)
-    parser.add_argument('--cram-index-path-col', type=str, required=True)
-    parser.add_argument('--sex-col', type=str, required=False)
-    parser.add_argument('--female-code', type=str, required=False)
-
-    parser.add_argument('--n-samples', type=int, required=False)
-
-    parser.add_argument('--sample-group-size', type=int, required=True, default=100)
-    parser.add_argument('--samples-per-copy-group', type=int, default=100)
-
-    parser.add_argument('--ligate-cpu', type=int, required=True)
-    parser.add_argument('--ligate-memory', type=str, required=False, default='standard')
-    parser.add_argument('--ligate-storage', type=str, required=False)
-    parser.add_argument('--ligate-ref-dict', type=str, required=False, default="gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.dict")
-
-    # Filters for running a specific set of samples and chunk
-    parser.add_argument('--contig', type=str, required=False)
-    parser.add_argument('--chunk-index', type=int, required=False)
-    parser.add_argument('--sample-group-index', type=int, required=False)
-
-    parser.add_argument('--staging-remote-tmpdir', type=str, required=True)
-    parser.add_argument('--output-file', type=str, required=True)
-
-    parser.add_argument('--fasta', type=str, required=False, default='gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta')
-
-    parser.add_argument('--use-checkpoints', action='store_true', required=False)
-    parser.add_argument('--save-checkpoints', action='store_true', required=False)
-    parser.add_argument('--always-delete-temp-files', action='store_true', required=False)
-
-    # Extra phase arguments
-    parser.add_argument('--phase-cpu', type=int, required=True)
-    parser.add_argument('--phase-memory', type=str, required=False, default='standard')
-    parser.add_argument('--phase-impute-reference-only-variants', action='store_true', required=False)
-    parser.add_argument('--phase-call-indels', action='store_true', required=False)
-    parser.add_argument('--phase-n-burn-in', type=int, required=False)
-    parser.add_argument('--phase-n-main', type=int, required=False)
-    parser.add_argument('--phase-effective-population-size', type=int, required=False)
-
-    # Extra merge vcf arguments
-    parser.add_argument('--merge-vcf-cpu', type=int, required=True)
-    parser.add_argument('--merge-vcf-memory', type=str, required=False, default='lowmem')
-    parser.add_argument('--merge-vcf-storage', type=str, required=False, default='0Gi')
-
-    parser.add_argument('--gcs-requester-pays-configuration', type=str, required=False)
-
-    parser.add_argument('--non-par-contigs', type=str, required=True)
-
-    parser.add_argument('--group-by-ann-col', type=str, nargs='*')
-
-    args = vars(parser.parse_args())
-
-    print('submitting jobs with the following parameters:')
     print(json.dumps(args, indent=4))
     asyncio.run(impute(args))
