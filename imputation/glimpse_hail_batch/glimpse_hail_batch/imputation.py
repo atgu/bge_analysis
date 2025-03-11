@@ -94,13 +94,14 @@ async def run_sample_group(b: hb.Batch,
                                                         for chunk in chunks],
                                                       cancel_on_error=True)
 
-        chunk_idx = 0
+        global_chunk_idx = 0
         for contig, chunks in contig_chunks.items():
+            local_chunk_idx = 0
             for chunk in chunks:
-                phased_output_file = phased_output_files[contig][chunk.chunk_idx]
+                phased_output_file = phased_output_files[contig][local_chunk_idx]
 
-                phase_exists = phasing_already_completed[chunk_idx]
-                phase_checkpoint_file = phase_checkpoint_files[chunk_idx]
+                phase_exists = phasing_already_completed[global_chunk_idx]
+                phase_checkpoint_file = phase_checkpoint_files[global_chunk_idx]
 
                 phase_j = phase(b,
                                 phased_output_file,
@@ -127,7 +128,8 @@ async def run_sample_group(b: hb.Batch,
                     phase_j.depends_on(*copy_cram_jobs)
                     phase_jobs.append(phase_j)
 
-                chunk_idx += 1
+                global_chunk_idx += 1
+                local_chunk_idx += 1
 
     ligate_jobs = []
     if not skip_ligate:

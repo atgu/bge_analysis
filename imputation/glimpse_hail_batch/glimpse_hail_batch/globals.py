@@ -85,10 +85,10 @@ def find_chunks(reference_dir: Optional[str],
                                 n_variants=row['n_variants'],
                                 is_non_par=is_non_par))
 
-    chunks.sort(key=lambda c: c.chunk_idx)
+    chunks.sort(key=lambda c: (c.reference_contig, c.chunk_idx))
 
     if requested_contig is not None:
-        chunks = [chunk for chunk in chunks if chunk.chunk_contig == requested_contig]
+        chunks = [chunk for chunk in chunks if chunk.reference_contig == requested_contig]
         if requested_chunk_index is not None:
             chunks = [chunk for chunk in chunks if chunk.chunk_idx == requested_chunk_index]
 

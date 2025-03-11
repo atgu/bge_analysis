@@ -303,6 +303,9 @@ def union_sample_groups_from_vcfs(b: hb.Batch,
     if use_checkpoints and hfs.exists(output_path):
         return None
 
+    if output_path.endswith(".vcf.bgz") and group_by_ann_cols:
+        raise Exception(f"cannot export a VCF file with nested annotations specified by group_by_ann_cols {group_by_ann_cols}")
+
     j = b.new_bash_job(attributes={'name': f'union/{contig}'})
     j.cpu(cpu)
     j.image(docker)
@@ -316,10 +319,7 @@ def union_sample_groups_from_vcfs(b: hb.Batch,
         annotations = []
         for ann in group_by_ann_cols:
             annotations.append(f'''
-keys = pd_df["{ann}"].unique().tolist()
-for key in keys:
-    {mt} = {mt}.annotate_rows(info={mt}.info.annotate(**{{f"{ann}.{{key}}": hl.struct(INFO=hl.agg.filter(mt["{ann}"] == key, IMPUTE_INFO({mt})),
-                                                                                      AF=hl.agg.filter(mt["{ann}"] == key, AF({mt})))}}))
+{mt} = {mt}.annotate_rows(info={mt}.info.annotate(**{{"{ann}": hl.agg.group_by({mt}["{ann}"], hl.struct(INFO=IMPUTE_INFO({mt}), AF=AF({mt})))}}))
 ''')
         return '\n'.join(annotations)
 
@@ -339,7 +339,7 @@ import os
 from typing import List
 import pandas as pd
 
-hl.init(backend='batch', app_name='{batch_name}-union-{contig}', driver_cores=2, worker_cores=1)
+hl.init(backend='batch', app_name='{batch_name}-union-{contig}', driver_cores=4, worker_cores=1)
 
 paths = []
 sample_sizes = []
@@ -420,10 +420,6 @@ mt = mt.drop(*[f'info_{{i}}' for i in range(n_batches)])
 mt = mt.drop(*[f'rsid_{{i}}' for i in range(1, n_batches)])
 mt = mt.drop(*[f'qual_{{i}}' for i in range(1, n_batches)])
 mt = mt.drop(*[f'filters_{{i}}' for i in range(1, n_batches)])
-
-mt = mt.annotate_rows(info=mt.info.flatten())
-
-mt = mt.drop(*[{", ".join(f'"{col}"' for col in group_by_ann_cols)}])
 
 output_path = "{output_path}"
 
