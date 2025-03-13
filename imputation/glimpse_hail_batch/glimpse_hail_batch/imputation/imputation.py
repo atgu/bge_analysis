@@ -2,7 +2,6 @@ import asyncio
 import base64
 from collections import defaultdict
 import json
-
 from jinja2 import Environment, StrictUndefined
 import os
 import re
@@ -37,7 +36,8 @@ async def run_sample_group(b: hb.Batch,
                            fs: RouterAsyncFS) -> Tuple[List[Job], Optional[Job]]:
     print(f'staging sample group {sample_group.name}')
 
-    jg = b.create_job_group(attributes={'name': sample_group.name})
+    jg = b.create_job_group(attributes={'name': sample_group.name,
+                                        'N': str(len(sample_group.samples))})
     phasing_jg = jg.create_job_group(attributes={'name': f'{sample_group.name}/phase'})
     ligate_jg = jg.create_job_group(attributes={'name': f'{sample_group.name}/ligate'})
 
