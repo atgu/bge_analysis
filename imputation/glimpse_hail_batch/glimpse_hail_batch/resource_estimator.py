@@ -51,7 +51,7 @@ def estimate_resources(args: dict):
                     cost_per_core_hour = 0.02929425
                     n_oom += 1
 
-                estimated_runtime_mins = 3 + ((7.5e-6 * (chunk.n_rare + chunk.n_common) * actual_batch_size) / cores)
+                estimated_runtime_mins = 3 + ((1e-5 * (chunk.n_rare + chunk.n_common) * actual_batch_size) / cores)
 
                 rough_cost += n_batches * cores * (estimated_runtime_mins / 60) * cost_per_core_hour
 
