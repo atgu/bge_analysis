@@ -8,7 +8,7 @@ REMOTE_TMPDIR="gs://MY_BUCKET/test-glimpse/batch/"
 BATCH_REGIONS="us-central1"
 
 # you need to make sure these images exist
-DOCKER_HAIL="us-central1-docker.pkg.dev/MY_PROJECT/glimpse2/hail-with-job-groups:0.0.4"
+DOCKER_HAIL="us-central1-docker.pkg.dev/MY_PROJECT/glimpse2/hail-with-job-groups:0.0.1"
 DOCKER_GLIMPSE="us-central1-docker.pkg.dev/MY_PROJECT/glimpse2/glimpse2-gcloud:odelaneau_bd93ade"
 
 # change these only with a different reference panel

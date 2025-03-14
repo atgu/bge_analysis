@@ -80,10 +80,6 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    import sys
-
-    print(sys.argv)
-
     parser.add_argument('--input-path', required=True, type=str)
     parser.add_argument('--output-path', required=True, type=str)
     parser.add_argument('--sample-annotations', required=True, type=str)

@@ -4,14 +4,13 @@
 
 This repo contains a set of Python scripts to run GLIMPSE2 in Hail Batch designed for data stored in the Terra Data Repository. It is intended to be the same implementation as the WDL pipeline developed by Michael Gatzen and Chris Kachulis available [here](https://github.com/broadinstitute/palantir-workflows/tree/main/GlimpseImputationPipeline). The workflow is as follows:
 
-1. Build Docker Image
+1. Build Docker Images
 2. Register Hail Batch Service Account in Terra
-3. Chunk and Split Reference Panel
+3. Chunk and Split Reference Panel (if not already done)
 4. Estimate the Optimal Machine Type and Sample Group Size
 5. Run Imputation
     - Run a first pass through all the data
     - Rerun any failed jobs
-    - Run cleanup if any checkpoints were generated
 6. Cleanup Temporary Files
 
 ## Differences Between Hail Batch and WDL Implementation
@@ -54,6 +53,13 @@ If you have not created a "glimpse2" repository in your [Google Artifact Registr
 cd glimpse_hail_batch/
 docker build -t us-central1-docker.pkg.dev/<MY_PROJECT>/glimpse2/glimpse2-gcloud:odelaneau_bd93ade .
 docker push us-central1-docker.pkg.dev/<MY_PROJECT>/glimpse2/glimpse2-gcloud:odelaneau_bd93ade
+```
+
+We also need to build a modified version of Hail with unpublished features including job groups and being able to submit QoB jobs into an existing batch.
+
+```
+docker build -t us-central1-docker.pkg.dev/<MY_PROJECT>/glimpse2/hail-with-job-groups:0.0.1 -f Dockerfile.hail-job-groups
+docker push us-central1-docker.pkg.dev/<MY_PROJECT>/glimpse2/hail-with-job-groups:0.0.1
 ```
 
 ## Register Hail Batch Service Account with Terra
@@ -112,15 +118,20 @@ We provide a utility script to estimate the optimal sample group size given a sp
 
 ```
 % python3 -m glimpse_hail_batch.resource_estimator --help
-usage: resource_estimator.py [-h] --split-reference-dir SPLIT_REFERENCE_DIR --max-runtime-mins MAX_RUNTIME_MINS --target-runtime-mins TARGET_RUNTIME_MINS --n-samples N_SAMPLES
+usage: resource_estimator.py [-h] --reference-dir REFERENCE_DIR --chunk-info-dir CHUNK_INFO_DIR --binary-reference-file-regex BINARY_REFERENCE_FILE_REGEX --chunk-file-regex CHUNK_FILE_REGEX --n-samples N_SAMPLES
+                             [--gcs-requester-pays-configuration GCS_REQUESTER_PAYS_CONFIGURATION]
 
 options:
   -h, --help            show this help message and exit
-  --split-reference-dir SPLIT_REFERENCE_DIR
-  --max-runtime-mins MAX_RUNTIME_MINS
-  --target-runtime-mins TARGET_RUNTIME_MINS
+  --reference-dir REFERENCE_DIR
+  --chunk-info-dir CHUNK_INFO_DIR
+  --binary-reference-file-regex BINARY_REFERENCE_FILE_REGEX
+  --chunk-file-regex CHUNK_FILE_REGEX
   --n-samples N_SAMPLES
+  --gcs-requester-pays-configuration GCS_REQUESTER_PAYS_CONFIGURATION
 ```
+
+An example of running this script is at `scripts/estimate_resources.sh`
 
 *Example Output for Chromosome 22:*
 
@@ -139,24 +150,23 @@ options:
 
 Imputation in GLIMPSE runs in three steps:
 
-1. Phase samples for a specific chunk of the genome
-2. Ligate all the chunks for a specific chromosome
-3. Merge all the chromosomes together into a MatrixTable in Hail
+1. Phase samples for a specific chunk of the genome per sample group.
+2. Ligate all the chunks for a specific chromosome per sample group.
+3. Union all the ligated chromosomes for all sample groups and use Query on Batch to merge them together into one MatrixTable or VCF file.
 
-Samples are split into "Sample Groups" in order to increase parallelism and reduce memory requirements. All sample groups are merged in a final step that unions all the MatrixTable(s) in Hail Query on Batch into either a MatrixTable or compressed VCF file specified with `--output-file`.
+Samples are split into "Sample Groups" in order to increase parallelism and reduce memory requirements. All sample groups are merged in a final step that unions all the MatrixTable(s) in Hail Query on Batch into either a MatrixTable or compressed VCF file specified with `--output-file` by chromosome.
 
 The Python interface for running imputation is as follows:
 
-```commandline
-% python3 -m glimpse_hail_batch.imputation --help
-usage: imputation.py [-h] [--billing-project BILLING_PROJECT] [--batch-remote-tmpdir BATCH_REMOTE_TMPDIR] [--batch-regions BATCH_REGIONS] [--batch-name BATCH_NAME] [--batch-id BATCH_ID] [--seed SEED]
-                     --docker-glimpse DOCKER_GLIMPSE --docker-hail DOCKER_HAIL --split-reference-dir SPLIT_REFERENCE_DIR --sample-manifest SAMPLE_MANIFEST --sample-id-col SAMPLE_ID_COL --cram-path-col
-                     CRAM_PATH_COL --cram-index-path-col CRAM_INDEX_PATH_COL [--n-samples N_SAMPLES] --sample-group-size SAMPLE_GROUP_SIZE [--samples-per-copy-group SAMPLES_PER_COPY_GROUP] --ligate-cpu
-                     LIGATE_CPU [--ligate-memory LIGATE_MEMORY] [--ligate-storage LIGATE_STORAGE] [--ligate-ref-dict LIGATE_REF_DICT] [--contig CONTIG] [--chunk-index CHUNK_INDEX]
-                     [--sample-group-index SAMPLE_GROUP_INDEX] --staging-remote-tmpdir STAGING_REMOTE_TMPDIR --output-file OUTPUT_FILE [--fasta FASTA] [--use-checkpoints] [--save-checkpoints]
-                     [--always-delete-temp-files] --phase-cpu PHASE_CPU [--phase-memory PHASE_MEMORY] [--phase-impute-reference-only-variants] [--phase-call-indels] [--phase-n-burn-in PHASE_N_BURN_IN]
-                     [--phase-n-main PHASE_N_MAIN] [--phase-effective-population-size PHASE_EFFECTIVE_POPULATION_SIZE] --merge-vcf-cpu MERGE_VCF_CPU [--merge-vcf-memory MERGE_VCF_MEMORY]
-                     [--merge-vcf-storage MERGE_VCF_STORAGE]
+```
+% python3 -m glimpse_hail_batch.imputation.submit --help
+usage: submit.py [-h] [--billing-project BILLING_PROJECT] [--batch-remote-tmpdir BATCH_REMOTE_TMPDIR] [--batch-regions BATCH_REGIONS] [--batch-name BATCH_NAME] [--batch-id BATCH_ID] [--seed SEED] --docker-glimpse DOCKER_GLIMPSE --docker-hail
+                 DOCKER_HAIL --reference-dir REFERENCE_DIR --chunk-info-dir CHUNK_INFO_DIR --binary-reference-file-regex BINARY_REFERENCE_FILE_REGEX --chunk-file-regex CHUNK_FILE_REGEX --sample-manifest SAMPLE_MANIFEST --sample-id-col SAMPLE_ID_COL
+                 --cram-path-col CRAM_PATH_COL --cram-index-path-col CRAM_INDEX_PATH_COL [--sex-col SEX_COL] [--female-code FEMALE_CODE] [--n-samples N_SAMPLES] --sample-group-size SAMPLE_GROUP_SIZE [--samples-per-copy-group SAMPLES_PER_COPY_GROUP]
+                 --ligate-cpu LIGATE_CPU [--ligate-memory LIGATE_MEMORY] [--ligate-storage LIGATE_STORAGE] [--ligate-ref-dict LIGATE_REF_DICT] [--contig CONTIG] [--chunk-index CHUNK_INDEX] [--sample-group-index SAMPLE_GROUP_INDEX]
+                 --staging-remote-tmpdir STAGING_REMOTE_TMPDIR --output-file OUTPUT_FILE [--fasta FASTA] [--use-checkpoints] [--save-checkpoints] [--always-delete-temp-files] --phase-cpu PHASE_CPU --phase-memory PHASE_MEMORY
+                 [--phase-impute-reference-only-variants] [--phase-call-indels] [--phase-n-burn-in PHASE_N_BURN_IN] [--phase-n-main PHASE_N_MAIN] [--phase-effective-population-size PHASE_EFFECTIVE_POPULATION_SIZE] --merge-vcf-cpu MERGE_VCF_CPU
+                 [--merge-vcf-memory MERGE_VCF_MEMORY] [--merge-vcf-storage MERGE_VCF_STORAGE] [--gcs-requester-pays-configuration GCS_REQUESTER_PAYS_CONFIGURATION] [--non-par-contigs NON_PAR_CONTIGS]
 
 options:
   -h, --help            show this help message and exit
@@ -168,11 +178,16 @@ options:
   --seed SEED
   --docker-glimpse DOCKER_GLIMPSE
   --docker-hail DOCKER_HAIL
-  --split-reference-dir SPLIT_REFERENCE_DIR
+  --reference-dir REFERENCE_DIR
+  --chunk-info-dir CHUNK_INFO_DIR
+  --binary-reference-file-regex BINARY_REFERENCE_FILE_REGEX
+  --chunk-file-regex CHUNK_FILE_REGEX
   --sample-manifest SAMPLE_MANIFEST
   --sample-id-col SAMPLE_ID_COL
   --cram-path-col CRAM_PATH_COL
   --cram-index-path-col CRAM_INDEX_PATH_COL
+  --sex-col SEX_COL
+  --female-code FEMALE_CODE
   --n-samples N_SAMPLES
   --sample-group-size SAMPLE_GROUP_SIZE
   --samples-per-copy-group SAMPLES_PER_COPY_GROUP
@@ -199,16 +214,24 @@ options:
   --merge-vcf-cpu MERGE_VCF_CPU
   --merge-vcf-memory MERGE_VCF_MEMORY
   --merge-vcf-storage MERGE_VCF_STORAGE
+  --gcs-requester-pays-configuration GCS_REQUESTER_PAYS_CONFIGURATION
+  --non-par-contigs NON_PAR_CONTIGS
 ```
 
 An example script for invoking this command with example input parameters is at `scripts/imputation.sh`.
+
+### Submission
+
+When you run the imputation script, it first creates a batch on your local computer and then submits one job to that batch.
+That job then will submit jobs after determining which checkpoints exist if requested (see below). This setup was chosen in
+order to use an unpublished Hail feature (Job Groups) and accommodate large analyses that might take a long time to submit.
 
 ### Docker Images
 
 There are two Docker images required:
 
 1. The image built above with `GLIMPSE` and `gcloud` specified by `--docker-glimpse`
-2. An image containing Hail specified by `--docker-hail`. The default for this image is `hailgenetics/hail:0.2.133`
+2. An image built above containing the custom version of Hail specified by `--docker-hail`.
 
 ### Selecting a Subset of the Data
 
@@ -232,33 +255,62 @@ If you want to delete all temporary files (phase, ligate, merged VCF outputs), u
 Make sure when you are done and while the pipeline is running that you check the size of your `--staging-remote-tmpdir` to make sure files are being deleted:
 
 ```
-gcloud storage du -s --total --readable-sizes "gs://<MY_BUCKET>/test-staging/*"
+gcloud storage du -s --total --readable-sizes "gs://<MY_BUCKET>/staging/*"
 ```
 
 To specifically look at the **CRAM** file sizes:
 
 ```
-gcloud storage du -s --total --readable-sizes "gs://<MY_BUCKET>/test-staging/sg-*/crams/*"
+gcloud storage du -s --total --readable-sizes "gs://<MY_BUCKET>/staging/sg-*/crams/*"
 ```
 
 To specifically look at the **phase** file sizes:
 
 ```
-gcloud storage du -s --total --readable-sizes "gs://<MY_BUCKET>/test-staging/sg-*/phase/*/chunk-*/*"
+gcloud storage du -s --total --readable-sizes "gs://<MY_BUCKET>/staging/sg-*/phase/*/chunk-*/*"
 ```
 
 To specifically look at the **ligate** file sizes:
 
 ```
-gcloud storage du -s --total --readable-sizes "gs://<MY_BUCKET>/test-staging/sg-*/ligate/*/*"
+gcloud storage du -s --total --readable-sizes "gs://<MY_BUCKET>/staging/sg-*/ligate/*/*"
 ```
 
-To specifically look at the **merged VCF** file sizes:
+## Monitoring Progress
+
+You can use this script to show a live view of imputation progress by supplying the batch ID of interest.
 
 ```
-gcloud storage du -s --total --readable-sizes "gs://<MY_BUCKET>/test-staging/sg-*/merge-vcf/*"
+% python3 -m glimpse_hail_batch.monitor --help
+usage: monitor.py [-h] --batch-id BATCH_ID
+
+options:
+  -h, --help           show this help message and exit
+  --batch-id BATCH_ID
 ```
 
-## Modifying the Code
+## Adding IMPUTE Info Scores
 
-If you are modifying this script, make sure the CPU for the copy CRAM files job is the same as the Phase jobs. This is to ensure the Batch scheduler runs the copy step when it has capacity to run jobs for the corresponding sample group.
+You can run a post-processing step to add annotations to an existing MatrixTable or VCF with GT and GP defined.
+Given a sample annotations TSV file and a list of columns to group by, this script will add annotations for the IMPUTE INFO
+score and allele frequency for each category of the grouped column. For example, if grouping by "reported_sex", you would
+get the INFO score and AF for both Males and Females.
+
+```
+% python3 -m glimpse_hail_batch.add_impute_info_scores --help
+usage: add_impute_info_scores.py [-h] --input-path INPUT_PATH --output-path OUTPUT_PATH --sample-annotations SAMPLE_ANNOTATIONS [--sample-id-col-input SAMPLE_ID_COL_INPUT] --sample-id-col-ann SAMPLE_ID_COL_ANN --group-by-col GROUP_BY_COL
+                                 [GROUP_BY_COL ...] [--overwrite] [--hl-init-kwarg [INIT_KWARGS ...]]
+
+options:
+  -h, --help            show this help message and exit
+  --input-path INPUT_PATH
+  --output-path OUTPUT_PATH
+  --sample-annotations SAMPLE_ANNOTATIONS
+  --sample-id-col-input SAMPLE_ID_COL_INPUT
+  --sample-id-col-ann SAMPLE_ID_COL_ANN
+  --group-by-col GROUP_BY_COL [GROUP_BY_COL ...]
+  --overwrite
+  --hl-init-kwarg [INIT_KWARGS ...]
+```
+
+An example version of running this script is at `scripts/add_impute_info_scores.sh`.
