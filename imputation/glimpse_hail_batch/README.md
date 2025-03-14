@@ -51,7 +51,7 @@ If you have not created a "glimpse2" repository in your [Google Artifact Registr
 
 ```
 cd glimpse_hail_batch/
-docker build -t us-central1-docker.pkg.dev/<MY_PROJECT>/glimpse2/glimpse2-gcloud:odelaneau_bd93ade .
+docker build -t us-central1-docker.pkg.dev/<MY_PROJECT>/glimpse2/glimpse2-gcloud:odelaneau_bd93ade -f Dockerfile.glimpse_gcloud .
 docker push us-central1-docker.pkg.dev/<MY_PROJECT>/glimpse2/glimpse2-gcloud:odelaneau_bd93ade
 ```
 
