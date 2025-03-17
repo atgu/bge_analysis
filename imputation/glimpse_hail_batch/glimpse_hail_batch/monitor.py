@@ -3,6 +3,7 @@ import argparse
 import statistics
 from functools import partial
 import re
+from typing import List
 
 from rich.live import Live
 from rich.table import Table
@@ -12,6 +13,150 @@ from rich.panel import Panel
 import hailtop.batch_client.aioclient as bc
 from hailtop.utils import bounded_gather
 from hailtop.utils.time import parse_timestamp_msecs, time_msecs, humanize_timedelta_msecs, time_msecs_str
+
+
+SAMPLE_GROUPS = []
+
+
+def markup_cell(value: str, state: str, started: bool) -> str:
+    if state in ('Success', 'success'):
+        return f'[green]{value}[/]'
+    if state in ('failure', 'cancelled', 'Failed', 'Cancelled', 'Errored'):
+        return f'[red]{value}[/]'
+    if started and state in ('running', 'Ready', 'Creating', 'Running'):
+        return f'[blue]{value}[/]'
+    else:
+        return f'[black]{value}[/]'
+
+
+class SampleGroupProgress:
+    @staticmethod
+    async def initialize(b: bc.Batch, job_group: bc.JobGroup):
+        jobs = [job async for job in job_group.jobs(recursive=True)]
+        jobs = [await b.get_job(job['job_id']) for job in jobs]
+        progress = SampleGroupProgress(job_group, jobs)
+        await progress.refresh()
+        progress._refresh_task = asyncio.create_task(progress.refresh())
+        return progress
+
+    def __init__(self, job_group: bc.JobGroup, jobs: List[bc.Job]):
+        self.job_group = job_group
+        self.jobs = jobs
+        self._job_group_id = job_group.job_group_id
+        self._sample_group_id = None
+        self._status = None
+        self._attempts = None
+        self._attributes = None
+        self._state = None
+        self._start_time = None
+        self._end_time = None
+        self._cost = None
+        self._n_jobs = None
+        self._n_succeeded = None
+        self._n_failed = None
+        self._n_cancelled = None
+        self._n_completed = None
+        self._refresh_task = None
+        self._needs_refresh = True
+
+    async def close(self):
+        return self._refresh_task.cancel()
+
+    async def refresh(self):
+        if not self._needs_refresh:
+            return
+
+        self._status = await self.job_group.status()
+        self._attributes = await self.job_group.attributes()
+        self._sample_group_id = int(self._attributes['name'].split('/')[0].split('-')[2])
+        self._state = self._status['state']
+        self._total_cost = self._status['cost']
+        self._n_jobs = self._status['n_jobs']
+        self._n_succeeded = self._status['n_succeeded']
+        self._n_failed = self._status['n_failed']
+        self._n_cancelled = self._status['n_cancelled']
+        self._n_completed = self._status['n_completed']
+        self._attempts = await bounded_gather(*[partial(job.attempts) for job in self.jobs], cancel_on_error=True)
+
+        child_job_groups = {(await child_jg.attributes()).get('name', ''): child_jg async for child_jg in self.job_group.job_groups()}
+        child_job_groups = {name.split('/')[1]: child_jg for name, child_jg in child_job_groups.items()}
+
+        phase_job_group = child_job_groups['phase']
+
+        phase_status = await phase_job_group.status()
+        ligate_status = await child_job_groups['ligate'].status()
+
+        self._phase_cost = phase_status['cost']
+        self._ligate_cost = ligate_status['cost']
+
+        self._other_costs = max(0, self._total_cost - self._phase_cost - self._ligate_cost)
+
+        if self._status != 'running':
+            self._needs_refresh = False
+
+    @property
+    def sample_size(self):
+        return int(self._attributes['N'])
+
+    @property
+    def percent_completed(self):
+        return 100 * (self._n_completed / self._n_jobs)
+
+    @property
+    def has_started(self):
+        return self._n_completed > 0
+
+    @property
+    def state(self):
+        return self._state
+
+    @property
+    def start_time(self):
+        if self._attempts:
+            self._start_time = min([parse_timestamp_msecs(attempt.get('start_time'))
+                                    for job_attempts in self._attempts
+                                    for attempt in job_attempts])
+        return time_msecs_str(self._start_time)
+
+    @property
+    def end_time(self):
+        if self._state != 'running':
+            end_times = [parse_timestamp_msecs(attempt.get('end_time'))
+                         for job_attempts in self._attempts
+                         for attempt in job_attempts
+                         if attempt.get('end_time') is not None]
+            if end_times:
+                self._end_time = max(end_times)
+        return time_msecs_str(self._end_time)
+
+    @property
+    def duration(self):
+        end_time = self._end_time or time_msecs()
+        return humanize_timedelta_msecs(end_time - self._start_time)
+
+    def phase_duration_stats(self):
+        durations = [(parse_timestamp_msecs(attempt.get('end_time')) or time_msecs()) - (parse_timestamp_msecs(attempt.get('start_time')) or time_msecs())
+                     for job_attempts in self._attempts
+                     for attempt in job_attempts]
+        durations = [duration / 1000 / 60 for duration in durations]
+        min_duration = min(durations)
+        max_duration = max(durations)
+        mean_duration = statistics.mean(durations)
+        return (min_duration, max_duration, mean_duration)
+
+    def update_table(self, table):
+        min_duration_min, max_duration_min, mean_duration_min = self.phase_duration_stats()
+
+        row = [f"{self._sample_group_id}", f"{self._job_group_id}", f"{self.start_time}", f"{self.end_time}",
+               f"{self.duration}", f"{self._state}", f"{self._n_jobs}", f"{self._n_completed}",
+               f"{self.percent_completed:.2f}", f"{self._n_succeeded}", f"{self._n_failed}", f"{self._n_cancelled}",
+               f"{mean_duration_min:.2f}", f"{min_duration_min:.2f}", f"{max_duration_min:.2f}",
+               f"${self._phase_cost:.4f}", f"${self._ligate_cost:.4f}", f"${self._other_costs:.4f}", f"${self._total_cost:.4f}",
+               f"${self._total_cost / self.sample_size:.4f}"]
+
+        row = [markup_cell(c, self._state, self.has_started) for c in row]
+
+        table.add_row(*row)
 
 
 def get_sample_group_id(name: str) -> int:
@@ -37,18 +182,9 @@ async def get_true_job_duration_mins(b: bc.Batch, job: dict):
     return (name, start_time, end_time, duration_ms / 1000 / 60)
 
 
-def markup_cell(value: str, state: str, started: bool) -> str:
-    if state in ('Success', 'success'):
-        return f'[green]{value}[/]'
-    if state in ('failure', 'cancelled', 'Failed', 'Cancelled', 'Errored'):
-        return f'[red]{value}[/]'
-    if started and state in ('running', 'Ready', 'Creating', 'Running'):
-        return f'[blue]{value}[/]'
-    else:
-        return f'[black]{value}[/]'
-
-
 async def generate_sample_group_table(b: bc.Batch) -> Table:
+    global SAMPLE_GROUPS
+
     table = Table()
 
     table.add_column("Sample Group ID")
@@ -72,85 +208,14 @@ async def generate_sample_group_table(b: bc.Batch) -> Table:
     table.add_column("Total Cost")
     table.add_column("Total Cost per Sample")
 
-    job_groups = [((await jg.attributes()).get('name', ''), jg) async for jg in b.job_groups()]
-    job_groups = [(name, jg) for name, jg in job_groups if name.startswith('sample-group')]
-    job_groups.sort(key=lambda x: get_sample_group_id(x[0]))
+    if len(SAMPLE_GROUPS) == 0:
+        job_groups = [((await jg.attributes()).get('name', ''), jg) async for jg in b.job_groups()]
+        job_groups = [jg for name, jg in job_groups if name.startswith('sample-group')]
+        SAMPLE_GROUPS = await bounded_gather(*[partial(SampleGroupProgress.initialize, b, jg) for jg in job_groups])
+        SAMPLE_GROUPS.sort(key=lambda jg: jg._sample_group_id)
 
-    for jg_name, jg in job_groups:
-        sample_group_id = get_sample_group_id(jg_name)
-
-        status = await jg.status()
-
-        n_samples = int((await jg.attributes())['N'])
-
-        n_jobs = status['n_jobs']
-        n_succeeded = status['n_succeeded']
-        n_failed = status['n_failed']
-        n_cancelled = status['n_cancelled']
-        n_completed = status['n_completed']
-        percent_completed = 100 * (n_completed / n_jobs)
-
-        total_cost = status['cost']
-
-        child_job_groups = {(await child_jg.attributes()).get('name', ''): child_jg async for child_jg in jg.job_groups()}
-        child_job_groups = {name.split('/')[1]: child_jg for name, child_jg in child_job_groups.items()}
-
-        phase_job_group = child_job_groups['phase']
-
-        phase_status = await phase_job_group.status()
-        ligate_status = await child_job_groups['ligate'].status()
-
-        phase_cost = phase_status['cost']
-        ligate_cost = ligate_status['cost']
-
-        other_costs = max(0, total_cost - phase_cost - ligate_cost)
-
-        all_jobs = [job async for job in jg.jobs(recursive=True)]
-        info = await bounded_gather(*[partial(get_true_job_duration_mins, b, job) for job in all_jobs],
-                                    cancel_on_error=True)
-
-        start_times = [x[1] for x in info if x[1] is not None]
-        end_times = [x[2] for x in info if x[2] is not None]
-
-        phase_duration_min = [x[3] for x in info if 'phase' in x[0] and x[3] is not None]
-
-        start_time_str = None
-        end_time_str = None
-
-        if start_times:
-            start_time = min(start_times)
-            start_time_str = time_msecs_str(start_time)
-            if end_times:
-                end_time = max(end_times)
-                end_time_str = time_msecs_str(end_time)
-                job_group_duration = humanize_timedelta_msecs(end_time - start_time)
-            else:
-                now = time_msecs()
-                job_group_duration = humanize_timedelta_msecs(now - start_time)
-        else:
-            job_group_duration = None
-
-        if phase_duration_min:
-            mean_duration_min = round(statistics.mean(phase_duration_min), 1)
-            min_duration_min = round(min(phase_duration_min), 1)
-            max_duration_min = round(max(phase_duration_min), 1)
-        else:
-            mean_duration_min = None
-            min_duration_min = None
-            max_duration_min = None
-
-        state = status['state']
-        if state == 'running' and not start_times:
-            state = 'pending'
-
-        row = [f"{sample_group_id}", f"{jg.job_group_id}", f"{start_time_str}", f"{end_time_str}", f"{job_group_duration}",  f"{state}", f"{n_jobs}", f"{n_completed}",
-               f"{percent_completed:.2f}", f"{n_succeeded}", f"{n_failed}", f"{n_cancelled}", f"{mean_duration_min}",
-               f"{min_duration_min}", f"{max_duration_min}",
-               f"${phase_cost:.4f}", f"${ligate_cost:.4f}", f"${other_costs:.4f}", f"${total_cost:.4f}", f"${total_cost / n_samples:.4f}"]
-
-        row = [markup_cell(c, status['state'], (n_succeeded + n_failed + n_cancelled) > 0) for c in row]
-
-        table.add_row(*row)
+    for sample_group in SAMPLE_GROUPS:
+        sample_group.update_table(table)
 
     return table
 
@@ -228,10 +293,11 @@ async def main(batch_id: int):
                 )
 
                 live.update(panel_group)
-                await asyncio.sleep(15)
+                await asyncio.sleep(30)
     finally:
+        for sample_group in SAMPLE_GROUPS:
+            await sample_group.close()
         await batch_client.close()
-
 
 
 if __name__ == '__main__':
