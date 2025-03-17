@@ -159,29 +159,6 @@ class SampleGroupProgress:
         table.add_row(*row)
 
 
-def get_sample_group_id(name: str) -> int:
-    return int(name.split('/')[0].split('-')[2])
-
-
-async def get_true_job_duration_mins(b: bc.Batch, job: dict):
-    name = job['name']
-    job = await b.get_job(job['job_id'])
-    attempts = await job.attempts()
-    duration_ms = 0
-    start_time = None
-    end_time = None
-    if not attempts:
-        return (name, None, None, None)
-
-    for attempt in attempts:
-        duration_ms += attempt['duration_ms']
-        _start_time = parse_timestamp_msecs(attempt.get('start_time'))
-        start_time = min(start_time, _start_time) if start_time else _start_time
-        _end_time = parse_timestamp_msecs(attempt.get('end_time'))
-        end_time = min(end_time, _end_time) if end_time else _end_time
-    return (name, start_time, end_time, duration_ms / 1000 / 60)
-
-
 async def generate_sample_group_table(b: bc.Batch) -> Table:
     global SAMPLE_GROUPS
 
