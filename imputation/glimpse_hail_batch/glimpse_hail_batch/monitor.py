@@ -87,7 +87,7 @@ class SampleGroupProgress:
 
         self._other_costs = max(0, self._total_cost - self._phase_cost - self._ligate_cost)
 
-        if self._status != 'running':
+        if self._state != 'running':
             self._needs_refresh = False
 
     @property
