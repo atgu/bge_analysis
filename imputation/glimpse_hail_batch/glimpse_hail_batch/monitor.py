@@ -36,7 +36,6 @@ class SampleGroupProgress:
         jobs = [await b.get_job(job['job_id']) for job in jobs]
         progress = SampleGroupProgress(job_group, jobs)
         await progress.refresh()
-        progress._refresh_task = asyncio.create_task(progress.refresh())
         return progress
 
     def __init__(self, job_group: bc.JobGroup, jobs: List[bc.Job]):
@@ -58,9 +57,6 @@ class SampleGroupProgress:
         self._n_completed = None
         self._refresh_task = None
         self._needs_refresh = True
-
-    async def close(self):
-        return self._refresh_task.cancel()
 
     async def refresh(self):
         if not self._needs_refresh:
@@ -272,8 +268,6 @@ async def main(batch_id: int):
                 live.update(panel_group)
                 await asyncio.sleep(30)
     finally:
-        for sample_group in SAMPLE_GROUPS:
-            await sample_group.close()
         await batch_client.close()
 
 
