@@ -33,7 +33,7 @@ class SampleGroupProgress:
     @staticmethod
     async def initialize(b: bc.Batch, job_group: bc.JobGroup):
         jobs = [job async for job in job_group.jobs(recursive=True)]
-        jobs = [await b.get_job(job['job_id']) for job in jobs]
+        jobs = [bc.Job.submitted_job(b, j['job_id'], _status=None) for j in jobs]
         progress = SampleGroupProgress(job_group, jobs)
         return progress
 
@@ -71,7 +71,9 @@ class SampleGroupProgress:
         self._n_failed = self._status['n_failed']
         self._n_cancelled = self._status['n_cancelled']
         self._n_completed = self._status['n_completed']
-        self._attempts = await bounded_gather(*[partial(job.attempts) for job in self.jobs], cancel_on_error=True)
+
+        attempts = await bounded_gather(*[partial(job.attempts) for job in self.jobs], cancel_on_error=True, parallelism=10)
+        self._attempts = [att for att in attempts if att is not None]
 
         child_job_groups = {(await child_jg.attributes()).get('name', ''): child_jg async for child_jg in self.job_group.job_groups()}
         child_job_groups = {name.split('/')[1]: child_jg for name, child_jg in child_job_groups.items()}
@@ -86,7 +88,7 @@ class SampleGroupProgress:
 
         self._other_costs = max(0.0, self._total_cost - self._phase_cost - self._ligate_cost)
 
-        if self._state != 'running':
+        if not self.is_running:
             self._needs_refresh = False
 
     @property
@@ -96,6 +98,10 @@ class SampleGroupProgress:
     @property
     def percent_completed(self):
         return 100 * (self._n_completed / self._n_jobs)
+
+    @property
+    def is_running(self):
+        return self._n_completed != self._n_jobs
 
     @property
     def has_started(self):
@@ -110,30 +116,48 @@ class SampleGroupProgress:
         if self._attempts:
             self._start_time = min([parse_timestamp_msecs(attempt.get('start_time'))
                                     for job_attempts in self._attempts
-                                    for attempt in job_attempts])
-        return time_msecs_str(self._start_time)
+                                    for attempt in job_attempts
+                                    if attempt is not None])
+        if self._start_time:
+            return time_msecs_str(self._start_time)
+        return None
 
     @property
     def end_time(self):
-        if self._state != 'running':
+        if not self.is_running:
             end_times = [parse_timestamp_msecs(attempt.get('end_time'))
                          for job_attempts in self._attempts
                          for attempt in job_attempts
-                         if attempt.get('end_time') is not None]
+                         if attempt is not None and attempt.get('end_time') is not None]
             if end_times:
                 self._end_time = max(end_times)
-        return time_msecs_str(self._end_time)
+        if self._end_time:
+            return time_msecs_str(self._end_time)
+        return None
 
     @property
     def duration(self):
         end_time = self._end_time or time_msecs()
-        return humanize_timedelta_msecs(end_time - self._start_time)
+        if self._start_time and end_time:
+            return humanize_timedelta_msecs(end_time - self._start_time)
+        return None
 
     def phase_duration_stats(self):
-        durations = [(parse_timestamp_msecs(attempt.get('end_time')) or time_msecs()) - (parse_timestamp_msecs(attempt.get('start_time')) or time_msecs())
-                     for job_attempts in self._attempts
-                     for attempt in job_attempts]
+        durations = []
+        for job_attempts in self._attempts:
+            start_time = None
+            end_time = None
+            for attempt in job_attempts:
+                _start_time = parse_timestamp_msecs(attempt.get('start_time')) or time_msecs()
+                start_time = _start_time if start_time is None else min(_start_time, start_time)
+                _end_time = parse_timestamp_msecs(attempt.get('end_time')) or time_msecs()
+                end_time = _end_time if end_time is None else max(_end_time, end_time)
+            durations.append(end_time - start_time)
+
         durations = [duration / 1000 / 60 for duration in durations]
+        if not durations:
+            return (None, None, None)
+
         min_duration = min(durations)
         max_duration = max(durations)
         mean_duration = statistics.mean(durations)
@@ -149,7 +173,7 @@ class SampleGroupProgress:
                f"${self._phase_cost:.4f}", f"${self._ligate_cost:.4f}", f"${self._other_costs:.4f}", f"${self._total_cost:.4f}",
                f"${self._total_cost / self.sample_size:.4f}"]
 
-        row = [markup_cell(c, self._state, self.has_started) for c in row]
+        row = [markup_cell(c, self._state if not self.is_running else 'running', self.has_started) for c in row]
 
         table.add_row(*row)
 
@@ -183,15 +207,23 @@ async def generate_sample_group_table(b: bc.Batch) -> Table:
     if len(SAMPLE_GROUPS) == 0:
         job_groups = [((await jg.attributes()).get('name', ''), jg) async for jg in b.job_groups()]
         job_groups = [jg for name, jg in job_groups if name.startswith('sample-group')]
-        SAMPLE_GROUPS = await bounded_gather(*[partial(SampleGroupProgress.initialize, b, jg) for jg in job_groups])
+        SAMPLE_GROUPS = await bounded_gather(*[partial(SampleGroupProgress.initialize, b, jg) for jg in job_groups], parallelism=5)
         SAMPLE_GROUPS.sort(key=lambda jg: jg._sample_group_id)
 
-    await bounded_gather(*[partial(sample_group.refresh) for sample_group in SAMPLE_GROUPS])
+    await bounded_gather(*[partial(sample_group.refresh) for sample_group in SAMPLE_GROUPS], parallelism=5)
 
     for sample_group in SAMPLE_GROUPS:
         sample_group.update_table(table)
 
     return table
+
+
+def get_contig(contig):
+    contig = re.sub('^[^0-9]', '', contig)
+    try:
+        return int(contig)
+    except:
+        return contig
 
 
 async def generate_union_table(b: bc.Batch) -> Table:
@@ -207,7 +239,8 @@ async def generate_union_table(b: bc.Batch) -> Table:
         return table
 
     contig_job_groups = [((await child_jg.attributes())['contig'], child_jg) async for child_jg in job_groups[0].job_groups()]
-    contig_job_groups.sort(key=lambda x: int(re.sub('[^0-9]','', x[0])))
+
+    contig_job_groups.sort(key=lambda x: get_contig(x[0]))
 
     for contig, contig_jg in contig_job_groups:
         status = await contig_jg.status()
@@ -236,6 +269,7 @@ async def get_total_costs(b: bc.Batch) -> Table:
     table.add_column("Total Cost")
     table.add_column("GLIMPSE Costs")
     table.add_column("Union + Other Costs")
+    table.add_column("Duration")
 
     job_groups = [((await jg.attributes()).get('name', ''), jg) async for jg in b.job_groups()]
 
@@ -243,7 +277,11 @@ async def get_total_costs(b: bc.Batch) -> Table:
     total_cost = (await b.status())['cost']
     union_cost = total_cost - glimpse_cost
 
-    row = [f'${total_cost:.2f}', f'${glimpse_cost:.2f}', f'${union_cost:.2f}']
+    start_time = parse_timestamp_msecs((await b.status())['time_created'])
+    end_time = parse_timestamp_msecs((await b.status())['time_completed']) or time_msecs()
+    duration = humanize_timedelta_msecs(end_time - start_time)
+
+    row = [f'${total_cost:.2f}', f'${glimpse_cost:.2f}', f'${union_cost:.2f}', f'{duration}']
 
     table.add_row(*row)
 
@@ -254,7 +292,7 @@ async def main(batch_id: int):
     batch_client = await bc.BatchClient.create('dummy')
     try:
         b = await batch_client.get_batch(batch_id)
-        with Live(refresh_per_second=4) as live:
+        with Live(refresh_per_second=30) as live:
             while True:
                 sample_group_table = await generate_sample_group_table(b)
                 union_sample_groups_table = await generate_union_table(b)
@@ -263,7 +301,7 @@ async def main(batch_id: int):
                 panel_group = Group(
                     Panel(sample_group_table,  title='Sample Groups'),
                     Panel(union_sample_groups_table, title='Union Data By Contig'),
-                    Panel(total_costs, title='Total Costs')
+                    Panel(total_costs, title='Batch Summary')
                 )
 
                 live.update(panel_group)
