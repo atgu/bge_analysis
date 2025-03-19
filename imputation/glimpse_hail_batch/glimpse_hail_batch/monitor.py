@@ -35,7 +35,6 @@ class SampleGroupProgress:
         jobs = [job async for job in job_group.jobs(recursive=True)]
         jobs = [await b.get_job(job['job_id']) for job in jobs]
         progress = SampleGroupProgress(job_group, jobs)
-        await progress.refresh()
         return progress
 
     def __init__(self, job_group: bc.JobGroup, jobs: List[bc.Job]):
@@ -85,7 +84,7 @@ class SampleGroupProgress:
         self._phase_cost = phase_status['cost']
         self._ligate_cost = ligate_status['cost']
 
-        self._other_costs = max(0, self._total_cost - self._phase_cost - self._ligate_cost)
+        self._other_costs = max(0.0, self._total_cost - self._phase_cost - self._ligate_cost)
 
         if self._state != 'running':
             self._needs_refresh = False
@@ -186,6 +185,8 @@ async def generate_sample_group_table(b: bc.Batch) -> Table:
         job_groups = [jg for name, jg in job_groups if name.startswith('sample-group')]
         SAMPLE_GROUPS = await bounded_gather(*[partial(SampleGroupProgress.initialize, b, jg) for jg in job_groups])
         SAMPLE_GROUPS.sort(key=lambda jg: jg._sample_group_id)
+
+    await bounded_gather(*[partial(sample_group.refresh) for sample_group in SAMPLE_GROUPS])
 
     for sample_group in SAMPLE_GROUPS:
         sample_group.update_table(table)
