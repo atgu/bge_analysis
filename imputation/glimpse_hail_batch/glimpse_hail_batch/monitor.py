@@ -166,10 +166,14 @@ class SampleGroupProgress:
     def update_table(self, table):
         min_duration_min, max_duration_min, mean_duration_min = self.phase_duration_stats()
 
+        min_duration_min = f"{min_duration_min:.2f}" if min_duration_min else "None"
+        mean_duration_min = f"{mean_duration_min:.2f}" if mean_duration_min else "None"
+        max_duration_min = f"{max_duration_min:.2f}" if max_duration_min else "None"
+
         row = [f"{self._sample_group_id}", f"{self._job_group_id}", f"{self.start_time}", f"{self.end_time}",
                f"{self.duration}", f"{self._state}", f"{self._n_jobs}", f"{self._n_completed}",
                f"{self.percent_completed:.2f}", f"{self._n_succeeded}", f"{self._n_failed}", f"{self._n_cancelled}",
-               f"{mean_duration_min:.2f}", f"{min_duration_min:.2f}", f"{max_duration_min:.2f}",
+               mean_duration_min, min_duration_min, max_duration_min,
                f"${self._phase_cost:.4f}", f"${self._ligate_cost:.4f}", f"${self._other_costs:.4f}", f"${self._total_cost:.4f}",
                f"${self._total_cost / self.sample_size:.4f}"]
 
