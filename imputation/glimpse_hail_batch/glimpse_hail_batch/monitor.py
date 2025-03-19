@@ -17,8 +17,12 @@ from hailtop.utils.time import parse_timestamp_msecs, time_msecs, humanize_timed
 
 SAMPLE_GROUPS = []
 
+use_dark_mode = False
+
 
 def markup_cell(value: str, state: str, started: bool) -> str:
+    global use_dark_mode
+    
     if state in ('Success', 'success'):
         return f'[green]{value}[/]'
     if state in ('failure', 'cancelled', 'Failed', 'Cancelled', 'Errored'):
@@ -26,6 +30,8 @@ def markup_cell(value: str, state: str, started: bool) -> str:
     if started and state in ('running', 'Ready', 'Creating', 'Running'):
         return f'[blue]{value}[/]'
     else:
+        if use_dark_mode:
+            return f'[white]{value}[/]'
         return f'[black]{value}[/]'
 
 
@@ -317,6 +323,9 @@ async def main(batch_id: int):
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('--batch-id', type=int, required=True)
+    p.add_argument('--dark-mode', action='store_true', default=False)
     args = p.parse_args()
+
+    use_dark_mode = args.dark_mode
 
     asyncio.run(main(args.batch_id))
