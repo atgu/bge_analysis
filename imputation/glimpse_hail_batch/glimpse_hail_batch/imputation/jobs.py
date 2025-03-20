@@ -287,7 +287,7 @@ import pandas as pd
 
 batch_id = int(os.environ['HAIL_BATCH_ID'])
 
-hl.init(backend="batch", app_name="union-{contig}", batch_id=batch_id)
+hl.init(backend="batch", app_name="union-{contig}")  # FIXME: batch_id=batch_id
 
 paths = []
 sample_sizes = []
