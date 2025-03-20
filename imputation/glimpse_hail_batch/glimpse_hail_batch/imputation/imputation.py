@@ -286,7 +286,7 @@ async def impute(args: dict):
                                                 union_contig_jg,
                                                 b.read_input(union_sample_groups_inputs_path),
                                                 output_file,
-                                                args['docker_hail'],
+                                                'hailgenetics/hail:0.2.133',  # FIXME: args['docker_hail'],
                                                 args['merge_vcf_cpu'],
                                                 args['merge_vcf_memory'],
                                                 args['merge_vcf_storage'],
