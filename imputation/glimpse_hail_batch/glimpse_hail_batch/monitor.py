@@ -22,7 +22,7 @@ use_dark_mode = False
 
 def markup_cell(value: str, state: str, started: bool) -> str:
     global use_dark_mode
-    
+
     if state in ('Success', 'success'):
         return f'[green]{value}[/]'
     if state in ('failure', 'cancelled', 'Failed', 'Cancelled', 'Errored'):
@@ -241,6 +241,7 @@ async def generate_union_table(b: bc.Batch) -> Table:
 
     table.add_column("Contig")
     table.add_column("State")
+    table.add_column("Cost")
 
     job_groups = [((await jg.attributes()).get('name', ''), jg) async for jg in b.job_groups()]
 
