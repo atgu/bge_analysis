@@ -5,6 +5,10 @@ import json
 import os
 from shlex import quote as shq
 
+import typer
+from rich.prompt import Confirm, IntPrompt, Prompt
+from typer import Abort, Exit
+
 from hailtop.aiotools.copy import copy_from_dict
 import hailtop.batch as hb
 from hailtop.utils import secret_alnum_string
@@ -128,5 +132,10 @@ if __name__ == '__main__':
 
     print('submitting jobs with the following parameters:')
     print(json.dumps(args, indent=4))
+
+    if args['phase_memory'] == 'highmem':
+        correct_memory = Confirm.ask('Are you sure you want to use highmem machines for phasing?')
+        if not correct_memory:
+            raise Exit()
 
     asyncio.run(submit(args))
