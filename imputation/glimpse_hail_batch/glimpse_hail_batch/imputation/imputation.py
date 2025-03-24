@@ -14,7 +14,7 @@ import hailtop.fs as hfs
 from hailtop.aiotools.router_fs import RouterAsyncFS
 from hailtop.utils import bounded_gather
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from .jobs import (
     copy_temp_crams_job, delete_temp_files_job, heal_phase_jobs, ligate, phase, union_sample_groups_from_vcfs, write_success
@@ -25,6 +25,10 @@ from ..globals import Chunk, SampleGroup, file_exists, find_crams, find_chunks, 
 env = Environment(undefined=StrictUndefined)
 
 
+def flatten(xs: dict):
+    return [elt for x in xs.values() for elt in x]
+
+
 async def run_sample_group(b: hb.Batch,
                            args: dict,
                            contig_chunks: Dict[str, List[Chunk]],
@@ -33,7 +37,7 @@ async def run_sample_group(b: hb.Batch,
                            ref_dict: hb.ResourceFile,
                            samples_per_copy_group: int,
                            prev_copy_cram_jobs: List[Job],
-                           fs: RouterAsyncFS) -> Tuple[List[Job], Optional[Job]]:
+                           fs: RouterAsyncFS) -> Tuple[List[Job], Dict[str, Job]]:
     print(f'staging sample group {sample_group.name}')
 
     jg = b.create_job_group(attributes={'name': sample_group.name,
@@ -86,7 +90,7 @@ async def run_sample_group(b: hb.Batch,
 
             copy_cram_jobs.append(copy_j)
 
-    phase_jobs = []
+    phase_jobs = defaultdict(list)
     heal_jobs = []
 
     n_variants_contig = {contig: sum(chunk.n_variants for chunk in chunks) for contig, chunks in contig_chunks.items()}
@@ -136,7 +140,7 @@ async def run_sample_group(b: hb.Batch,
 
                 if phase_j is not None:
                     phase_j.depends_on(*copy_cram_jobs)
-                    phase_jobs.append(phase_j)
+                    phase_jobs[contig].append(phase_j)
 
                 global_chunk_idx += 1
                 local_chunk_idx += 1
@@ -145,7 +149,7 @@ async def run_sample_group(b: hb.Batch,
         if heal_j is not None:
             heal_jobs.append(heal_j)
 
-    ligate_jobs = []
+    ligate_jobs = {}
     if not skip_ligate:
         for contig, phased_files in phased_output_files.items():
             phased_inputs = [b.read_input_group(bcf=file + '.bcf', csi=file + '.bcf.csi')
@@ -167,22 +171,22 @@ async def run_sample_group(b: hb.Batch,
                               args['use_checkpoints'])
 
             if ligate_j is not None:
-                ligate_j.depends_on(*(copy_cram_jobs + phase_jobs + heal_jobs))
-                ligate_jobs.append(ligate_j)
+                ligate_j.depends_on(*(copy_cram_jobs + phase_jobs[contig] + heal_jobs))
+                ligate_jobs[contig] = ligate_j
 
     success_j = None
     if not args['use_checkpoints'] or not hfs.exists(sample_group.success_file):
         success_j = write_success(b, jg, sample_group, args['docker_hail'])
-        success_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs + heal_jobs))
+        success_j.depends_on(*(copy_cram_jobs + flatten(phase_jobs) + list(ligate_jobs.values()) + heal_jobs))
 
     if args['always_delete_temp_files'] or success_j is not None:
         delete_jobs = []
         delete_j = delete_temp_files_job(b, jg, sample_group, args['save_checkpoints'])
-        delete_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs + heal_jobs))
+        delete_j.depends_on(*(copy_cram_jobs + flatten(phase_jobs) + list(ligate_jobs.values()) + heal_jobs))
         delete_j.always_run(True)
         delete_jobs.append(delete_j)
 
-    return (copy_cram_jobs, success_j)
+    return (copy_cram_jobs, ligate_jobs)
 
 
 async def impute(args: dict):
@@ -256,20 +260,21 @@ async def impute(args: dict):
     fasta_input = b.read_input_group(**{'fasta': args['fasta'], 'fasta.fai': f'{args["fasta"]}.fai'})
     ref_dict = b.read_input(args['ligate_ref_dict'])
 
-    success_jobs = []
     prev_copy_cram_jobs = []
+    union_ligate_input_jobs = defaultdict(list)
     for sample_group in sample_groups:
-        prev_copy_cram_jobs, success_j = await run_sample_group(b,
-                                                                args,
-                                                                contig_chunks,
-                                                                sample_group,
-                                                                fasta_input,
-                                                                ref_dict,
-                                                                args['samples_per_copy_group'],
-                                                                prev_copy_cram_jobs,
-                                                                backend._fs)
-        if success_j is not None:
-            success_jobs.append(success_j)
+        prev_copy_cram_jobs, ligate_jobs = await run_sample_group(b,
+                                                                  args,
+                                                                  contig_chunks,
+                                                                  sample_group,
+                                                                  fasta_input,
+                                                                  ref_dict,
+                                                                  args['samples_per_copy_group'],
+                                                                  prev_copy_cram_jobs,
+                                                                  backend._fs)
+
+        for contig, ligate_j in ligate_jobs.items():
+            union_ligate_input_jobs[contig].append(ligate_j)
 
     union_sample_groups_jg = b.create_job_group(attributes={'name': 'union-sample-groups'})
 
@@ -302,7 +307,7 @@ async def impute(args: dict):
                                                 contig)
 
         if union_j is not None:
-            union_j.depends_on(*success_jobs)
+            union_j.depends_on(*union_ligate_input_jobs.get(contig, []))
 
     b.run(wait=False, disable_progress_bar=True)
 
