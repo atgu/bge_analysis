@@ -78,6 +78,9 @@ class SampleGroupProgress:
         self._n_cancelled = self._status['n_cancelled']
         self._n_completed = self._status['n_completed']
 
+        if self._n_succeeded == len(self.jobs):
+            self._state = 'Success'
+
         attempts = await bounded_gather(*[partial(job.attempts) for job in self.jobs], cancel_on_error=True, parallelism=10)
         self._attempts = [att for att in attempts if att is not None]
 
@@ -241,7 +244,6 @@ async def generate_union_table(b: bc.Batch) -> Table:
 
     table.add_column("Contig")
     table.add_column("State")
-    table.add_column("Cost")
 
     job_groups = [((await jg.attributes()).get('name', ''), jg) async for jg in b.job_groups()]
 
@@ -256,8 +258,6 @@ async def generate_union_table(b: bc.Batch) -> Table:
     for contig, contig_jg in contig_job_groups:
         status = await contig_jg.status()
 
-        total_cost = status['cost']
-
         n_succeeded = status['n_succeeded']
         n_failed = status['n_failed']
         n_cancelled = status['n_cancelled']
@@ -265,7 +265,7 @@ async def generate_union_table(b: bc.Batch) -> Table:
         jobs = [(await b.get_job(job['job_id'])) async for job in contig_jg.jobs()]
         state = (await jobs[0].status())['state']
 
-        row = [contig, state, f'${total_cost:.2f}']
+        row = [contig, state]
 
         row = [markup_cell(c, state, (n_succeeded + n_failed + n_cancelled) > 0) for c in row]
 
