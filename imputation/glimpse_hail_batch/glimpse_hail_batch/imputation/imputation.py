@@ -102,6 +102,18 @@ async def run_sample_group(b: hb.Batch,
         sample_ploidy_list = sample_group.write_sample_ploidy_list()
         sample_ploidy_input = b.read_input(sample_ploidy_list)
 
+        heal_j = heal_phase_jobs(b,
+                                 phasing_jg,
+                                 sample_group,
+                                 args['docker_hail'],
+                                 args['billing_project'],
+                                 args['batch_remote_tmpdir'],
+                                 args['phase_max_attempts'])
+        heal_j.depends_on(*copy_cram_jobs)
+
+        if heal_j is not None:
+            heal_jobs.append(heal_j)
+
         phase_checkpoint_files = await bounded_gather(*[partial(sample_group.initialize_phased_glimpse_checkpoint_file, fs, contig, chunk.chunk_idx, args['use_checkpoints'])
                                                         for contig, chunks in contig_chunks.items()
                                                         for chunk in chunks],
@@ -144,10 +156,6 @@ async def run_sample_group(b: hb.Batch,
 
                 global_chunk_idx += 1
                 local_chunk_idx += 1
-
-        heal_j = heal_phase_jobs(b, jg, sample_group, args['docker_hail'], args['phase_max_attempts'])
-        if heal_j is not None:
-            heal_jobs.append(heal_j)
 
     ligate_jobs = {}
     if not skip_ligate:
