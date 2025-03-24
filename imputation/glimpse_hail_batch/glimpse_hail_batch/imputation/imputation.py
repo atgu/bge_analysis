@@ -17,7 +17,7 @@ from hailtop.utils import bounded_gather
 from typing import Dict, List, Optional, Tuple
 
 from .jobs import (
-    copy_temp_crams_job, delete_temp_files_job, ligate, phase, union_sample_groups_from_vcfs, write_success
+    copy_temp_crams_job, delete_temp_files_job, heal_phase_jobs, ligate, phase, union_sample_groups_from_vcfs, write_success
 )
 from ..globals import Chunk, SampleGroup, file_exists, find_crams, find_chunks, get_ligate_storage_requirement, split_samples_into_groups
 
@@ -87,6 +87,7 @@ async def run_sample_group(b: hb.Batch,
             copy_cram_jobs.append(copy_j)
 
     phase_jobs = []
+    heal_jobs = []
 
     n_variants_contig = {contig: sum(chunk.n_variants for chunk in chunks) for contig, chunks in contig_chunks.items()}
 
@@ -140,6 +141,10 @@ async def run_sample_group(b: hb.Batch,
                 global_chunk_idx += 1
                 local_chunk_idx += 1
 
+        heal_j = heal_phase_jobs(b, jg, sample_group, args['docker_hail'], args['phase_max_attempts'])
+        if heal_j is not None:
+            heal_jobs.append(heal_j)
+
     ligate_jobs = []
     if not skip_ligate:
         for contig, phased_files in phased_output_files.items():
@@ -162,18 +167,18 @@ async def run_sample_group(b: hb.Batch,
                               args['use_checkpoints'])
 
             if ligate_j is not None:
-                ligate_j.depends_on(*(copy_cram_jobs + phase_jobs))
+                ligate_j.depends_on(*(copy_cram_jobs + phase_jobs + heal_jobs))
                 ligate_jobs.append(ligate_j)
 
     success_j = None
     if not args['use_checkpoints'] or not hfs.exists(sample_group.success_file):
         success_j = write_success(b, jg, sample_group, args['docker_hail'])
-        success_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs))
+        success_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs + heal_jobs))
 
     if args['always_delete_temp_files'] or success_j is not None:
         delete_jobs = []
         delete_j = delete_temp_files_job(b, jg, sample_group, args['save_checkpoints'])
-        delete_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs))
+        delete_j.depends_on(*(copy_cram_jobs + phase_jobs + ligate_jobs + heal_jobs))
         delete_j.always_run(True)
         delete_jobs.append(delete_j)
 

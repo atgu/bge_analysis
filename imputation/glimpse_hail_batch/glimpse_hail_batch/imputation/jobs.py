@@ -1,6 +1,8 @@
+import copy
 from typing import List, Optional
 
 import hailtop.batch as hb
+import hailtop.batch_client.client as sync_bc
 from hailtop.batch.job import Job
 import hailtop.fs as hfs
 
@@ -28,6 +30,134 @@ def copy_temp_crams_job(b: hb.Batch,
     j.cpu(cpu)
     j.memory(memory)
 
+    return j
+
+
+resources = []
+for cpu in (1, 2, 4, 8, 16):
+    for memory in ('lowmem', 'standard', 'highmem'):
+        resources.append((cpu, memory))
+
+
+class JobInfo:
+    @staticmethod
+    def from_json(d: dict):
+        return JobInfo(d['name'], d['batch_id'], d['job_id'], d['state'], exit_code=d['exit_code'])
+
+    def __init__(self, name, batch_id, job_id, state, exit_code):
+        self.name = name
+        self.batch_id = batch_id
+        self.job_id = job_id
+        self.state = state
+        self.exit_code = exit_code
+        self.attempt_number = None
+
+    def is_oom(self):
+        return self.exit_code is not None and self.exit_code == 137
+
+    def should_be_rerun(self):
+        return self.is_oom() or self.state == 'Failed'
+
+    def resubmit_with_more_resources(self, jg: sync_bc.JobGroup) -> Optional[hb.Job]:
+        global resources
+
+        j = sync_bc.Batch(jg._async_job_group._batch).get_job(self.job_id)
+        status = j.status()
+        spec = status['spec']
+
+        cpu = int(spec['resources']['req_cpu'])
+        memory = spec['resources']['req_memory']
+
+        resource_index = resources.index((cpu, memory))
+        if resource_index == -1 or resource_index == len(resources) - 1:
+            return None
+
+        new_cpu, new_memory = resources[resource_index + 1]
+
+        resources = {
+            'cpu': str(new_cpu),
+            'memory': new_memory,
+            'storage': spec['resources']['req_storage'],
+            'preemptible': spec['preemptible'],
+        }
+
+        env = {var['name']: var['value'] for var in spec['env']}
+
+        attributes = copy.deepcopy(status['attributes'])
+
+        j = jg.create_job(spec['process']['image'],
+                          spec['process']['command'],
+                          env=env,
+                          resources=resources,
+                          attributes=attributes,
+                          input_files=spec.get('input_files'),
+                          output_files=spec.get('output_files'),
+                          always_run=status['always_run'],
+                          timeout=spec.get('timeout'),
+                          cloudfuse=spec.get('cloudfuse'),
+                          requester_pays_project=spec.get('requester_pays_project'),
+                          regions=spec['regions'],
+                          always_copy_output=spec['always_copy_output'],
+                          )
+
+        return j
+
+
+def heal(max_attempts: int = 2):
+    import os
+    import time
+    from collections import Counter
+
+    import hailtop.batch as hb
+    import hailtop.batch_client.client as bc
+
+    batch_id = int(os.environ['HAIL_BATCH_ID'])
+    job_group_id = int(os.environ['HAIL_JOB_GROUP_ID'])
+
+    backend = hb.ServiceBackend(billing_project='dummy')
+    b = hb.Batch.from_batch_id(batch_id, backend=backend)
+    jg = hb.JobGroup.from_job_group_id(b, job_group_id)
+
+    jg_bc = bc.JobGroup(jg._async_job_group)
+
+    while True:
+        job_info = [JobInfo.from_json(j) for j in jg_bc.jobs(q='task=phase', version=2)]
+
+        n_attempts = Counter(j.name for j in job_info)
+
+        job_info.sort(key=lambda x: x.job_id, reverse=True)
+
+        latest_attempts = {}
+        for job in job_info:
+            if job.name not in latest_attempts:
+                latest_attempts[job.name] = job
+                job.attempt_number = n_attempts[job.name]
+
+        all_completed = all(j.state in ('Cancelled', 'Success') or j.attempt_number >= max_attempts
+                            for j in latest_attempts.values())
+
+        if all_completed:
+            all_succeeded = all(j.state == 'Success' for j in latest_attempts.values())
+            if all_succeeded:
+                return
+            raise Exception('Some phasing jobs were cancelled, failed, or exceeded maximum number of attempts.')
+
+        for j in latest_attempts.values():
+            if n_attempts[j.name] < max_attempts and j.state in ('Failed', 'Error'):
+                j.resubmit_with_more_resources(jg_bc)
+
+        time.sleep(60)
+
+
+def heal_phase_jobs(b: hb.Batch,
+                    jg: hb.JobGroup,
+                    sample_group: SampleGroup,
+                    docker: str,
+                    max_attempts: int = 2) -> hb.Job:
+    j = jg.new_python_job(name=f'phase-heal/sample-group-{sample_group.sample_group_index}')
+    j.image(docker)
+    j.cpu(0.25)
+    j.call(heal, max_attempts)
     return j
 
 

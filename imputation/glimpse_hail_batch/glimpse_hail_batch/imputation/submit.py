@@ -7,7 +7,7 @@ from shlex import quote as shq
 
 from hailtop.aiotools.copy import copy_from_dict
 import hailtop.batch as hb
-from hailtop.utils import secret_alnum_string, async_to_blocking
+from hailtop.utils import secret_alnum_string
 
 
 async def submit(args):
@@ -113,6 +113,7 @@ if __name__ == '__main__':
     parser.add_argument('--phase-n-burn-in', type=int, required=False)
     parser.add_argument('--phase-n-main', type=int, required=False)
     parser.add_argument('--phase-effective-population-size', type=int, required=False)
+    parser.add_argument('--phase-max-attempts', type=int, required=False, default=2)
 
     # Extra merge vcf arguments
     parser.add_argument('--merge-vcf-cpu', type=int, required=True)
