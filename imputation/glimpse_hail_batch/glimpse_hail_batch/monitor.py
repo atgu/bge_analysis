@@ -192,7 +192,8 @@ class SampleGroupProgress:
                f"{self.duration}", f"{state}", f"{self.percent_completed:.2f}", f"{self._n_jobs}",
                f"{self._n_running}", f"{self._n_completed}", f"{self._n_succeeded}", f"{self._n_failed}", f"{self._n_cancelled}",
                mean_duration_min, min_duration_min, max_duration_min,
-               f"${self._phase_cost:.4f}", f"${self._ligate_cost:.4f}", f"${self._other_costs:.4f}", f"${self._total_cost:.4f}",
+               # f"${self._phase_cost:.4f}", f"${self._ligate_cost:.4f}", f"${self._other_costs:.4f}",
+               f"${self._total_cost:.4f}",
                f"${self._total_cost / self.sample_size:.4f}"]
 
         row = [markup_cell(c, self._state if not self.is_running else 'running', self.has_started) for c in row]
@@ -221,9 +222,9 @@ async def generate_sample_group_table(b: bc.Batch) -> Table:
     table.add_column("Average Phasing Job Runtime (mins)")
     table.add_column("Minimum Phasing Job Runtime (mins)")
     table.add_column("Maximum Phasing Job Runtime (mins)")
-    table.add_column("Phase Cost")
-    table.add_column("Ligate Cost")
-    table.add_column("Other Costs")
+    #table.add_column("Phase Cost")
+    #table.add_column("Ligate Cost")
+    #table.add_column("Other Costs")
     table.add_column("Total Cost")
     table.add_column("Total Cost per Sample")
 
