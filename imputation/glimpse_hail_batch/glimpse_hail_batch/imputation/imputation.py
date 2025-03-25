@@ -90,8 +90,7 @@ async def run_sample_group(b: hb.Batch,
 
             copy_cram_jobs.append(copy_j)
 
-    phase_jobs = defaultdict(list)
-    heal_jobs = []
+    phase_heal_jobs = defaultdict(list)
 
     n_variants_contig = {contig: sum(chunk.n_variants for chunk in chunks) for contig, chunks in contig_chunks.items()}
 
@@ -102,18 +101,6 @@ async def run_sample_group(b: hb.Batch,
         sample_ploidy_list = sample_group.write_sample_ploidy_list()
         sample_ploidy_input = b.read_input(sample_ploidy_list)
 
-        heal_j = heal_phase_jobs(b,
-                                 phasing_jg,
-                                 sample_group,
-                                 args['docker_hail'],
-                                 args['billing_project'],
-                                 args['batch_remote_tmpdir'],
-                                 args['phase_max_attempts'])
-        heal_j.depends_on(*copy_cram_jobs)
-
-        if heal_j is not None:
-            heal_jobs.append(heal_j)
-
         phase_checkpoint_files = await bounded_gather(*[partial(sample_group.initialize_phased_glimpse_checkpoint_file, fs, contig, chunk.chunk_idx, args['use_checkpoints'])
                                                         for contig, chunks in contig_chunks.items()
                                                         for chunk in chunks],
@@ -121,6 +108,17 @@ async def run_sample_group(b: hb.Batch,
 
         global_chunk_idx = 0
         for contig, chunks in contig_chunks.items():
+            heal_j = heal_phase_jobs(b,
+                                     phasing_jg,
+                                     sample_group,
+                                     contig,
+                                     args['docker_hail'],
+                                     args['billing_project'],
+                                     args['batch_remote_tmpdir'],
+                                     args['phase_max_attempts'])
+            heal_j.depends_on(*copy_cram_jobs)
+            phase_heal_jobs[contig].append(heal_j)
+
             local_chunk_idx = 0
             for chunk in chunks:
                 phased_output_file = phased_output_files[contig][local_chunk_idx]
@@ -152,7 +150,6 @@ async def run_sample_group(b: hb.Batch,
 
                 if phase_j is not None:
                     phase_j.depends_on(*copy_cram_jobs)
-                    phase_jobs[contig].append(phase_j)
 
                 global_chunk_idx += 1
                 local_chunk_idx += 1
@@ -179,18 +176,18 @@ async def run_sample_group(b: hb.Batch,
                               args['use_checkpoints'])
 
             if ligate_j is not None:
-                ligate_j.depends_on(*(copy_cram_jobs + phase_jobs[contig] + heal_jobs))
+                ligate_j.depends_on(*(copy_cram_jobs + phase_heal_jobs[contig]))
                 ligate_jobs[contig] = ligate_j
 
     success_j = None
     if not args['use_checkpoints'] or not hfs.exists(sample_group.success_file):
         success_j = write_success(b, jg, sample_group, args['docker_hail'])
-        success_j.depends_on(*(copy_cram_jobs + flatten(phase_jobs) + list(ligate_jobs.values()) + heal_jobs))
+        success_j.depends_on(*(copy_cram_jobs + flatten(phase_heal_jobs) + list(ligate_jobs.values())))
 
     if args['always_delete_temp_files'] or success_j is not None:
         delete_jobs = []
         delete_j = delete_temp_files_job(b, jg, sample_group, args['save_checkpoints'])
-        delete_j.depends_on(*(copy_cram_jobs + flatten(phase_jobs) + list(ligate_jobs.values()) + heal_jobs))
+        delete_j.depends_on(*(copy_cram_jobs + flatten(phase_heal_jobs) + list(ligate_jobs.values())))
         delete_j.always_run(True)
         delete_jobs.append(delete_j)
 

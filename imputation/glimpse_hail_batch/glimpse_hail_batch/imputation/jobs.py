@@ -111,8 +111,9 @@ class JobInfo:
         return j
 
 
-def heal(billing_project: str, remote_tmpdir: str, max_attempts: int = 2):
+def heal(contig: str, billing_project: str, remote_tmpdir: str, max_attempts: int = 2):
     import os
+    import re
     import asyncio
     from collections import Counter
 
@@ -125,13 +126,17 @@ def heal(billing_project: str, remote_tmpdir: str, max_attempts: int = 2):
     b = hb.Batch.from_batch_id(batch_id, backend=backend)
     jg = hb.JobGroup.from_job_group_id(b, job_group_id)
 
+    PHASE_JOB_NAME_REGEX = re.compile(f'^phase/.*/{contig}/.*')
+
     async def _heal(b, jg):
         b_bc = b._async_batch
         jg_bc = jg._async_job_group
 
         while True:
             print('healing jobs...')
-            job_info = [JobInfo.from_json(j) async for j in jg_bc.jobs() if 'phase/' in j['name']]
+
+            job_info = [JobInfo.from_json(j) async for j in jg_bc.jobs()
+                        if PHASE_JOB_NAME_REGEX.fullmatch(j['name']) is not None]
 
             print(f'found {len(job_info)} attempts')
 
@@ -172,14 +177,15 @@ def heal(billing_project: str, remote_tmpdir: str, max_attempts: int = 2):
 def heal_phase_jobs(b: hb.Batch,
                     jg: hb.JobGroup,
                     sample_group: SampleGroup,
+                    contig: str,
                     docker: str,
                     billing_project: str,
                     remote_tmpdir: str,
                     max_attempts: int = 2) -> hb.Job:
-    j = jg.new_python_job(name=f'phase-heal/sample-group-{sample_group.sample_group_index}')
+    j = jg.new_python_job(name=f'phase-heal/sample-group-{sample_group.sample_group_index}/{contig}')
     j.image(docker)
     j.cpu(0.25)
-    j.call(heal, billing_project, remote_tmpdir, max_attempts)
+    j.call(heal, contig, billing_project, remote_tmpdir, max_attempts)
     return j
 
 
