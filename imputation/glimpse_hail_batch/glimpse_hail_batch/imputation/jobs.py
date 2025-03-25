@@ -102,7 +102,7 @@ class JobInfo:
                           output_files=outputs,
                           always_run=status['always_run'],
                           timeout=spec.get('timeout'),
-                          cloudfuse=spec.get('cloudfuse'),
+                          cloudfuse=spec.get('gcsfuse'),
                           requester_pays_project=spec.get('requester_pays_project'),
                           regions=spec['regions'],
                           always_copy_output=spec['always_copy_output'],

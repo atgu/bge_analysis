@@ -81,6 +81,8 @@ class SampleGroupProgress:
         if self._n_succeeded == len(self.jobs):
             self._state = 'Success'
 
+        self._n_running = len([job async for job in self.job_group.jobs(recursive=True) if job['state'] == 'Running'])
+
         attempts = await bounded_gather(*[partial(job.attempts) for job in self.jobs], cancel_on_error=True, parallelism=10)
         self._attempts = [att for att in attempts if att is not None]
 
@@ -114,7 +116,7 @@ class SampleGroupProgress:
 
     @property
     def has_started(self):
-        return self._n_completed > 0
+        return self.start_time is not None
 
     @property
     def state(self):
@@ -126,7 +128,7 @@ class SampleGroupProgress:
             self._start_time = min([parse_timestamp_msecs(attempt.get('start_time'))
                                     for job_attempts in self._attempts
                                     for attempt in job_attempts
-                                    if attempt is not None])
+                                    if attempt is not None and attempt.get('start_time') is not None])
         if self._start_time:
             return time_msecs_str(self._start_time)
         return None
@@ -179,9 +181,16 @@ class SampleGroupProgress:
         mean_duration_min = f"{mean_duration_min:.2f}" if mean_duration_min else "None"
         max_duration_min = f"{max_duration_min:.2f}" if max_duration_min else "None"
 
-        row = [f"{self._sample_group_id}", f"{self._job_group_id}", f"{self.start_time}", f"{self.end_time}",
-               f"{self.duration}", f"{self._state}", f"{self._n_jobs}", f"{self._n_completed}",
-               f"{self.percent_completed:.2f}", f"{self._n_succeeded}", f"{self._n_failed}", f"{self._n_cancelled}",
+        if self.start_time is None:
+            state = 'pending'
+        elif self.start_time is not None and self.end_time is None:
+            state = 'running'
+        else:
+            state = self._state
+
+        row = [f"{self._sample_group_id}", f"{self._job_group_id}", # f"{self.start_time}", f"{self.end_time}",
+               f"{self.duration}", f"{state}", f"{self.percent_completed:.2f}", f"{self._n_jobs}",
+               f"{self._n_running}", f"{self._n_completed}", f"{self._n_succeeded}", f"{self._n_failed}", f"{self._n_cancelled}",
                mean_duration_min, min_duration_min, max_duration_min,
                f"${self._phase_cost:.4f}", f"${self._ligate_cost:.4f}", f"${self._other_costs:.4f}", f"${self._total_cost:.4f}",
                f"${self._total_cost / self.sample_size:.4f}"]
@@ -198,13 +207,14 @@ async def generate_sample_group_table(b: bc.Batch) -> Table:
 
     table.add_column("Sample Group ID")
     table.add_column("Job Group ID")
-    table.add_column("Start Time")
-    table.add_column("End Time")
+    #table.add_column("Start Time")
+    #table.add_column("End Time")
     table.add_column("Duration (mins)")
     table.add_column("State")
-    table.add_column("Number of Jobs")
-    table.add_column("Number of Completed Jobs")
     table.add_column("Percent Completed")
+    table.add_column("Number of Jobs")
+    table.add_column("Number of Running Jobs")
+    table.add_column("Number of Completed Jobs")
     table.add_column("Number of Succeeded Jobs")
     table.add_column("Number of Failed Jobs")
     table.add_column("Number of Cancelled Jobs")
@@ -221,9 +231,10 @@ async def generate_sample_group_table(b: bc.Batch) -> Table:
         job_groups = [((await jg.attributes()).get('name', ''), jg) async for jg in b.job_groups()]
         job_groups = [jg for name, jg in job_groups if name.startswith('sample-group')]
         SAMPLE_GROUPS = await bounded_gather(*[partial(SampleGroupProgress.initialize, b, jg) for jg in job_groups], parallelism=5)
-        SAMPLE_GROUPS.sort(key=lambda jg: jg._sample_group_id)
 
     await bounded_gather(*[partial(sample_group.refresh) for sample_group in SAMPLE_GROUPS], parallelism=5)
+
+    SAMPLE_GROUPS.sort(key=lambda jg: jg._sample_group_id)
 
     for sample_group in SAMPLE_GROUPS:
         sample_group.update_table(table)
@@ -303,7 +314,7 @@ async def main(batch_id: int):
     batch_client = await bc.BatchClient.create('dummy')
     try:
         b = await batch_client.get_batch(batch_id)
-        with Live(refresh_per_second=30) as live:
+        with Live(refresh_per_second=5) as live:
             while True:
                 sample_group_table = await generate_sample_group_table(b)
                 union_sample_groups_table = await generate_union_table(b)
@@ -316,7 +327,7 @@ async def main(batch_id: int):
                 )
 
                 live.update(panel_group)
-                await asyncio.sleep(30)
+                await asyncio.sleep(60)
     finally:
         await batch_client.close()
 
