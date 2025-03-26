@@ -17,7 +17,7 @@ from hailtop.utils import bounded_gather
 from typing import Dict, List, Tuple
 
 from .jobs import (
-    copy_temp_crams_job, delete_temp_files_job, heal_phase_jobs, ligate, phase, union_sample_groups_from_vcfs, write_success
+    copy_temp_crams_job, delete_temp_files_job, heal_phase_jobs, ligate, phase, union_sample_groups_from_vcfs, vcf_to_mt, write_success
 )
 from ..globals import Chunk, SampleGroup, file_exists, find_crams, find_chunks, get_ligate_storage_requirement, split_samples_into_groups
 
@@ -51,9 +51,11 @@ async def run_sample_group(b: hb.Batch,
     skip_copy_crams = False
     skip_phasing = False
     skip_ligate = False
+    skip_vcf_to_mt = False
 
-    ligated_output_files_by_contig = sample_group.get_ligate_output_file_names(contig_chunks)
     phased_output_files = sample_group.get_phased_output_file_names(contig_chunks)
+    ligated_output_files_by_contig = sample_group.get_ligate_output_file_names(contig_chunks)
+    vcf_to_mt_output_files_by_contig = sample_group.get_vcf_to_mt_output_file_names(contig_chunks)
 
     phasing_already_completed = [False for contig, chunks in contig_chunks.items() for _ in chunks]
 
@@ -65,10 +67,12 @@ async def run_sample_group(b: hb.Batch,
 
         is_phasing_complete = all(phasing_already_completed)
         is_ligate_complete = all([hfs.exists(file + '.vcf.bgz') for contig, file in ligated_output_files_by_contig.items()])
+        is_vcf_to_mt_complete = all([hfs.exists(file + '/_SUCCESS') for contig, file in vcf_to_mt_output_files_by_contig.items()])
 
         skip_copy_crams = is_phasing_complete
         skip_phasing = is_phasing_complete
         skip_ligate = is_ligate_complete
+        skip_vcf_to_mt = is_vcf_to_mt_complete
 
     copy_cram_jobs = []
     if not skip_copy_crams:
@@ -179,19 +183,42 @@ async def run_sample_group(b: hb.Batch,
                 ligate_j.depends_on(*(copy_cram_jobs + phase_heal_jobs[contig]))
                 ligate_jobs[contig] = ligate_j
 
+    vcf_to_mt_jobs = {}
+    if not skip_vcf_to_mt:
+        for contig, ligated_file in ligated_output_files_by_contig.items():
+            output_path = vcf_to_mt_output_files_by_contig[contig]
+
+            vcf_to_mt_j = vcf_to_mt(b,
+                                    jg,
+                                    sample_group,
+                                    ligated_file + '.vcf.bgz',
+                                    output_path,
+                                    contig,
+                                    args['docker_hail'],
+                                    args['vcf_to_mt_cpu'],
+                                    args['vcf_to_mt_memory'],
+                                    args['vcf_to_mt_storage'],
+                                    args['use_checkpoints'])
+
+            if vcf_to_mt_j is not None:
+                vcf_to_mt_j.depends_on(*(copy_cram_jobs + phase_heal_jobs[contig]))
+                if contig in ligate_jobs:
+                    vcf_to_mt_j.depends_on(ligate_jobs[contig])
+                vcf_to_mt_jobs[contig] = vcf_to_mt_j
+
     success_j = None
     if not args['use_checkpoints'] or not hfs.exists(sample_group.success_file):
         success_j = write_success(b, jg, sample_group, args['docker_hail'])
-        success_j.depends_on(*(copy_cram_jobs + flatten(phase_heal_jobs) + list(ligate_jobs.values())))
+        success_j.depends_on(*(copy_cram_jobs + flatten(phase_heal_jobs) + list(ligate_jobs.values()) + list(vcf_to_mt_jobs.values())))
 
     if args['always_delete_temp_files'] or success_j is not None:
         delete_jobs = []
         delete_j = delete_temp_files_job(b, jg, sample_group, args['save_checkpoints'])
-        delete_j.depends_on(*(copy_cram_jobs + flatten(phase_heal_jobs) + list(ligate_jobs.values())))
+        delete_j.depends_on(*(copy_cram_jobs + flatten(phase_heal_jobs)))
         delete_j.always_run(True)
         delete_jobs.append(delete_j)
 
-    return (copy_cram_jobs, ligate_jobs)
+    return (copy_cram_jobs, vcf_to_mt_jobs)
 
 
 async def impute(args: dict):
@@ -268,32 +295,32 @@ async def impute(args: dict):
     prev_copy_cram_jobs = []
     union_ligate_input_jobs = defaultdict(list)
     for sample_group in sample_groups:
-        prev_copy_cram_jobs, ligate_jobs = await run_sample_group(b,
-                                                                  args,
-                                                                  contig_chunks,
-                                                                  sample_group,
-                                                                  fasta_input,
-                                                                  ref_dict,
-                                                                  args['samples_per_copy_group'],
-                                                                  prev_copy_cram_jobs,
-                                                                  backend._fs)
+        prev_copy_cram_jobs, vcf_to_mt_jobs = await run_sample_group(b,
+                                                                     args,
+                                                                     contig_chunks,
+                                                                     sample_group,
+                                                                     fasta_input,
+                                                                     ref_dict,
+                                                                     args['samples_per_copy_group'],
+                                                                     prev_copy_cram_jobs,
+                                                                     backend._fs)
 
-        for contig, ligate_j in ligate_jobs.items():
-            union_ligate_input_jobs[contig].append(ligate_j)
+        for contig, vcf_to_mt_j in vcf_to_mt_jobs.items():
+            union_ligate_input_jobs[contig].append(vcf_to_mt_j)
 
     union_sample_groups_jg = b.create_job_group(attributes={'name': 'union-sample-groups'})
 
-    for contig in contig_chunks.keys():
+    for contig, chunks in contig_chunks.items():
         union_contig_jg = union_sample_groups_jg.create_job_group(attributes={'name': f'union-sample-groups/{contig}',
                                                                               'contig': contig})
 
-        sample_group_vcfs = [sample_group.ligate_output_file_root(contig) + '.vcf.bgz' for sample_group in sample_groups]
+        sample_group_mts = [sample_group.vcf_to_mt_output_file(contig) for sample_group in sample_groups]
         sample_group_sizes = [sample_group.n_samples for sample_group in sample_groups]
 
-        union_sample_groups_inputs_path = args['staging_remote_tmpdir'].rstrip('/') + f'/{contig}/sample_group_vcfs.txt'
+        union_sample_groups_inputs_path = args['staging_remote_tmpdir'].rstrip('/') + f'/{contig}/sample_group_mts.txt'
         with hfs.open(union_sample_groups_inputs_path, 'w') as f:
-            for vcf, sample_size in zip(sample_group_vcfs, sample_group_sizes):
-                f.write(f'{vcf}\t{sample_size}\n')
+            for mt_path, sample_size in zip(sample_group_mts, sample_group_sizes):
+                f.write(f'{mt_path}\t{sample_size}\n')
 
         output_file = env.from_string(args['output_file']).render(contig=contig)
 
@@ -302,14 +329,15 @@ async def impute(args: dict):
                                                 b.read_input(union_sample_groups_inputs_path),
                                                 output_file,
                                                 args['docker_hail'],
-                                                args['merge_vcf_cpu'],
-                                                args['merge_vcf_memory'],
-                                                args['merge_vcf_storage'],
+                                                args['union_sample_groups_cpu'],
+                                                args['union_sample_groups_memory'],
+                                                args['union_sample_groups_storage'],
                                                 args['billing_project'],
                                                 args['batch_remote_tmpdir'],
                                                 batch_regions,
                                                 args['use_checkpoints'],
-                                                contig)
+                                                contig,
+                                                len(chunks))
 
         if union_j is not None:
             union_j.depends_on(*union_ligate_input_jobs.get(contig, []))

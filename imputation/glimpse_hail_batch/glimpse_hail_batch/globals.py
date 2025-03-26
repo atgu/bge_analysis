@@ -201,13 +201,16 @@ class SampleGroup:
     def ligate_output_file_root(self, contig: str):
         return f'{self.ligate_output_dir}{contig}'
 
+    def vcf_to_mt_output_file(self, contig: str):
+        return f'{self.vcf_to_mt_output_dir}{contig}.mt'
+
     @property
     def ligate_output_dir(self):
         return f'{self.temp_dir}/ligate/'
 
     @property
-    def merged_mt_path(self):
-        return f'{self.temp_dir}/merge-vcf/merged.mt'
+    def vcf_to_mt_output_dir(self):
+        return f'{self.temp_dir}/vcf-to-mt/'
 
     @property
     def success_file(self):
@@ -242,6 +245,12 @@ class SampleGroup:
         output_files_by_contig = {}
         for contig in contig_chunks.keys():
             output_files_by_contig[contig] = self.ligate_output_file_root(contig)
+        return output_files_by_contig
+
+    def get_vcf_to_mt_output_file_names(self, contig_chunks: Dict[str, List[Chunk]]) -> Dict[str, str]:
+        output_files_by_contig = {}
+        for contig in contig_chunks.keys():
+            output_files_by_contig[contig] = self.vcf_to_mt_output_file(contig)
         return output_files_by_contig
 
     @property

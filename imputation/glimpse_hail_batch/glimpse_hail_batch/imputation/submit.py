@@ -90,11 +90,6 @@ if __name__ == '__main__':
     parser.add_argument('--sample-group-size', type=int, required=True, default=100)
     parser.add_argument('--samples-per-copy-group', type=int, default=100)
 
-    parser.add_argument('--ligate-cpu', type=int, required=True)
-    parser.add_argument('--ligate-memory', type=str, required=False, default='standard')
-    parser.add_argument('--ligate-storage', type=str, required=False)
-    parser.add_argument('--ligate-ref-dict', type=str, required=False, default="gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.dict")
-
     # Filters for running a specific set of samples and chunk
     parser.add_argument('--contig', type=str, required=False)
     parser.add_argument('--chunk-index', type=int, required=False)
@@ -119,10 +114,21 @@ if __name__ == '__main__':
     parser.add_argument('--phase-effective-population-size', type=int, required=False)
     parser.add_argument('--phase-max-attempts', type=int, required=False, default=2)
 
+    # Extra ligate arguments
+    parser.add_argument('--ligate-cpu', type=int, required=True)
+    parser.add_argument('--ligate-memory', type=str, required=False, default='standard')
+    parser.add_argument('--ligate-storage', type=str, required=False)
+    parser.add_argument('--ligate-ref-dict', type=str, required=False, default="gs://gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.dict")
+
+    # Extra vcf to mt arguments
+    parser.add_argument('--vcf-to-mt-cpu', type=int, required=False, default=16)
+    parser.add_argument('--vcf-to-mt-memory', type=str, required=False, default='standard')
+    parser.add_argument('--vcf-to-mt-storage', type=str, required=False, default='10Gi')
+
     # Extra merge vcf arguments
-    parser.add_argument('--merge-vcf-cpu', type=int, required=True)
-    parser.add_argument('--merge-vcf-memory', type=str, required=False, default='lowmem')
-    parser.add_argument('--merge-vcf-storage', type=str, required=False, default='0Gi')
+    parser.add_argument('--union-sample-groups-cpu', type=int, required=True)
+    parser.add_argument('--union-sample-groups-memory', type=str, required=False, default='lowmem')
+    parser.add_argument('--union-sample-groups-storage', type=str, required=False, default='0Gi')
 
     parser.add_argument('--gcs-requester-pays-configuration', type=str, required=False)
 
