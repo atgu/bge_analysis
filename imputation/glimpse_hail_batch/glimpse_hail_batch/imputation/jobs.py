@@ -441,7 +441,7 @@ hailctl config set batch/regions "{','.join(regions)}"
 
 
     mt_left = hl.import_vcf(paths[0], reference_genome="GRCh38")
-    add_info_if_needed(mt_left)
+    mt_left = add_info_if_needed(mt_left)
     mt_left = mt_left.annotate_rows(
         info=mt_left.info.annotate(N=sample_sizes[0], AF=mt_left.info.AF[0], INFO=mt_left.info.INFO[0],
                                    RAF=mt_left.info.RAF[0]))
@@ -449,7 +449,7 @@ hailctl config set batch/regions "{','.join(regions)}"
 
     for idx, path in enumerate(paths[1:]):
         mt_right = hl.import_vcf(path, reference_genome="GRCh38")
-        add_info_if_needed(mt_right)
+        mt_right = add_info_if_needed(mt_right)
         mt_right = mt_right.annotate_rows(
             info=mt_right.info.annotate(N=sample_sizes[idx], AF=mt_right.info.AF[0], INFO=mt_right.info.INFO[0],
                                         RAF=mt_right.info.RAF[0]))
