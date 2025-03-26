@@ -282,7 +282,7 @@ async def generate_union_table(b: bc.Batch) -> Table:
 
         row = [contig, state]
 
-        row = [markup_cell(c, state, (n_succeeded + n_failed + n_cancelled) > 0) for c in row]
+        row = [markup_cell(c, state, state == 'Running') for c in row]
 
         table.add_row(*row)
 
