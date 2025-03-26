@@ -275,6 +275,9 @@ async def generate_union_table(b: bc.Batch) -> Table:
         n_cancelled = status['n_cancelled']
 
         jobs = [(await b.get_job(job['job_id'])) async for job in contig_jg.jobs()]
+        if not jobs:
+            continue
+
         state = (await jobs[0].status())['state']
 
         row = [contig, state]

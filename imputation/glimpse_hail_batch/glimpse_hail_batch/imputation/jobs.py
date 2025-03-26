@@ -93,6 +93,10 @@ class JobInfo:
         if outputs:
             outputs = [(transfer['from'], transfer['to']) for transfer in outputs]
 
+        cloudfuse = spec.get('gcsfuse')
+        if cloudfuse is not None:
+            cloudfuse = [(mount['bucket'], mount['mount_path'], mount['read_only']) for mount in spec['gcsfuse']]
+
         j = jg.create_job(spec['process']['image'],
                           spec['process']['command'],
                           env=env,
@@ -102,7 +106,7 @@ class JobInfo:
                           output_files=outputs,
                           always_run=status['always_run'],
                           timeout=spec.get('timeout'),
-                          cloudfuse=spec.get('gcsfuse'),
+                          cloudfuse=cloudfuse,
                           requester_pays_project=spec.get('requester_pays_project'),
                           regions=spec['regions'],
                           always_copy_output=spec['always_copy_output'],
