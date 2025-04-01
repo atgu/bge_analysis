@@ -404,7 +404,7 @@ EOF
     return j
 
 
-def _vcf_to_mt(input_vcf: str, output_path: str):
+def _vcf_to_mt(input_vcf: str, output_path: str, cpu: int):
     import hail as hl
 
     hl.init(backend="spark",
@@ -440,7 +440,7 @@ def vcf_to_mt(b: hb.Batch,
     j.storage(storage)
     j.memory(memory)
 
-    j.call(_vcf_to_mt, input_vcf, output_path)
+    j.call(_vcf_to_mt, input_vcf, output_path, cpu)
 
     return j
 
