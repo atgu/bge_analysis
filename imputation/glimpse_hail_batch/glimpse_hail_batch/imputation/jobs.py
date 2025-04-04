@@ -500,7 +500,7 @@ hailctl config set batch/regions "{','.join(regions)}"
         mt_right = hl.read_matrix_table(path, _intervals=intervals)
         mt_right = add_info_if_needed(mt_right)
         mt_right = mt_right.annotate_rows(
-            info=mt_right.info.annotate(N=sample_sizes[idx], AF=mt_right.info.AF[0], INFO=mt_right.info.INFO[0],
+            info=mt_right.info.annotate(N=sample_sizes[idx + 1], AF=mt_right.info.AF[0], INFO=mt_right.info.INFO[0],
                                         RAF=mt_right.info.RAF[0]))
         mt_left = mt_left.union_cols(mt_right,
                                      drop_right_row_fields=False,
@@ -508,7 +508,7 @@ hailctl config set batch/regions "{','.join(regions)}"
 
     mt = mt_left
 
-    n_samples = mt.count_cols()
+    n_samples = sum(sample_sizes)
     n_batches = len(paths)
 
     mt = mt.annotate_rows(info=mt.info.annotate(AF=hl.array([mt[f"info_{i}"].AF for i in range(n_batches)])))
