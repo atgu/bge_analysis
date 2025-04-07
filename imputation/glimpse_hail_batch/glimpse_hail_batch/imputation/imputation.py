@@ -315,12 +315,11 @@ async def impute(args: dict):
                                                                               'contig': contig})
 
         sample_group_mts = [sample_group.vcf_to_mt_output_file(contig) for sample_group in sample_groups]
-        sample_group_sizes = [sample_group.n_samples for sample_group in sample_groups]
 
         union_sample_groups_inputs_path = args['staging_remote_tmpdir'].rstrip('/') + f'/{contig}/sample_group_mts.txt'
         with hfs.open(union_sample_groups_inputs_path, 'w') as f:
-            for mt_path, sample_size in zip(sample_group_mts, sample_group_sizes):
-                f.write(f'{mt_path}\t{sample_size}\n')
+            for mt_path in sample_group_mts:
+                f.write(f'{mt_path}\n')
 
         output_file = env.from_string(args['output_file']).render(contig=contig)
 

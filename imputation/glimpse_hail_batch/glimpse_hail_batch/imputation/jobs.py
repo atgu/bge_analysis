@@ -416,6 +416,8 @@ def _vcf_to_mt(input_vcf: str, output_path: str, cpu: int):
             )
 
     mt = hl.import_vcf(input_vcf)
+    n_samples = mt.count_cols()
+    mt = mt.annotate_rows(info=mt.info.annotate(N=n_samples))
     mt.write(output_path, overwrite=True)
 
 
@@ -474,12 +476,10 @@ hailctl config set batch/regions "{','.join(regions)}"
     assert backend.billing_project == billing_project
 
     paths = []
-    sample_sizes = []
     with open(mt_paths, 'r') as f:
         for line in f:
-            path, sample_size = line.rstrip("\n").split('\t')
+            path = line.rstrip("\n")
             paths.append(path)
-            sample_sizes.append(int(sample_size))
 
 
     def add_info_if_needed(mt):
@@ -492,7 +492,9 @@ hailctl config set batch/regions "{','.join(regions)}"
     mt_left = hl.read_matrix_table(paths[0], _intervals=intervals)
     mt_left = add_info_if_needed(mt_left)
     mt_left = mt_left.annotate_rows(
-        info=mt_left.info.annotate(N=sample_sizes[0], AF=mt_left.info.AF[0], INFO=mt_left.info.INFO[0],
+        info=mt_left.info.annotate(N=mt_left.info.N,
+                                   AF=mt_left.info.AF[0],
+                                   INFO=mt_left.info.INFO[0],
                                    RAF=mt_left.info.RAF[0]))
     mt_left = mt_left.annotate_rows(**{"info_0": mt_left.info})
 
@@ -500,7 +502,9 @@ hailctl config set batch/regions "{','.join(regions)}"
         mt_right = hl.read_matrix_table(path, _intervals=intervals)
         mt_right = add_info_if_needed(mt_right)
         mt_right = mt_right.annotate_rows(
-            info=mt_right.info.annotate(N=sample_sizes[idx + 1], AF=mt_right.info.AF[0], INFO=mt_right.info.INFO[0],
+            info=mt_right.info.annotate(N=mt_right.info.N,
+                                        AF=mt_right.info.AF[0],
+                                        INFO=mt_right.info.INFO[0],
                                         RAF=mt_right.info.RAF[0]))
         mt_left = mt_left.union_cols(mt_right,
                                      drop_right_row_fields=False,
@@ -508,7 +512,6 @@ hailctl config set batch/regions "{','.join(regions)}"
 
     mt = mt_left
 
-    n_samples = sum(sample_sizes)
     n_batches = len(paths)
 
     mt = mt.annotate_rows(info=mt.info.annotate(AF=hl.array([mt[f"info_{i}"].AF for i in range(n_batches)])))
@@ -517,7 +520,7 @@ hailctl config set batch/regions "{','.join(regions)}"
 
 
     def GLIMPSE_AF(mt):
-        return hl.sum(hl.map(lambda af, n: af * n, mt.info.AF, mt.info.N)) / n_samples
+        return hl.sum(hl.map(lambda af, n: af * n, mt.info.AF, mt.info.N)) / hl.sum(mt.info.N)
 
 
     def GLIMPSE_INFO(mt):
@@ -525,7 +528,7 @@ hailctl config set batch/regions "{','.join(regions)}"
                           1,
                           1 - hl.sum(
                               hl.map(lambda af, n, info: (1 - info) * 2 * n * af * (1 - af), mt.info.AF, mt.info.N,
-                                     mt.info.INFO)) / (2 * n_samples * GLIMPSE_AF(mt) * (1 - GLIMPSE_AF(mt))))
+                                     mt.info.INFO)) / (2 * hl.sum(mt.info.N) * GLIMPSE_AF(mt) * (1 - GLIMPSE_AF(mt))))
 
 
     mt = mt.annotate_rows(info=mt.info.annotate(AF=GLIMPSE_AF(mt), INFO=GLIMPSE_INFO(mt)))
