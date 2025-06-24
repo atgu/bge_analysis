@@ -1,0 +1,31 @@
+FROM hailgenetics/hail:0.2.133
+
+RUN apt-get update && apt-get install -y make
+
+RUN git clone --depth 1 --branch 0.2.133 https://github.com/hail-is/hail.git
+
+WORKDIR /hail
+
+RUN make install-dev-requirements
+
+#RUN make -C hail/ install HAIL_RELEASE_MODE=1 MILLOPS='--no-server'
+
+RUN mkdir /jg-hail/
+
+WORKDIR /jg-hail/
+
+RUN git clone --single-branch -b jg-job-groups-with-qob-attach-0.2.133 https://github.com/jigold/hail.git
+
+RUN cd hail/ && git format-patch -1 HEAD --stdout > jg-changes.patch
+
+WORKDIR /hail
+
+RUN git apply /jg-hail/hail/jg-changes.patch
+
+RUN make -C hail/ install HAIL_RELEASE_MODE=1 MILLOPS='--no-server'
+
+COPY glimpse_hail_batch/ /glimpse_hail_batch/glimpse_hail_batch/
+COPY setup.py /glimpse_hail_batch/
+
+# Hail is already installed with the dev version
+RUN pip3 install --no-deps /glimpse_hail_batch/
