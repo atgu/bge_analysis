@@ -1,7 +1,7 @@
 We used two main metrics for evaluating GLIMPSE's imputation accuracy:
 
 1. Concordance (including sensitivity, precision, and non-reference concordance)
-2. Aggregate R2 (squared Pearson's correlation)
+2. Aggregate R2 (squared Pearson's correlation for all SNPs in a given MAF bin)
 
 How is concordance calculated? 
 
