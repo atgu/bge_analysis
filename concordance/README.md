@@ -15,15 +15,15 @@ For each SNP, we can create the following contingency table:
 
 Let 1 = ALT and 0 = REF, then we have the following cases:
 
-truth = 0 and imputed = 0: D += 2
-truth = 1 and imputed = 0: D += 1 and B += 1
-truth = 2 and imputed = 0: B += 1
-truth = 0 and imputed = 1: D += 1 and C += 1
-truth = 1 and imputed = 1: A += 1 and D += 1
-truth = 2 and imputed = 1: A += 1 and B += 1
-truth = 0 and imputed = 2: C += 2
-truth = 1 and imputed = 2: A += 1 and C += 1
-truth = 2 and imputed = 2: A += 2
+truth = 0 and imputed = 0: D += 2  
+truth = 1 and imputed = 0: D += 1 and B += 1  
+truth = 2 and imputed = 0: B += 1  
+truth = 0 and imputed = 1: D += 1 and C += 1  
+truth = 1 and imputed = 1: A += 1 and D += 1  
+truth = 2 and imputed = 1: A += 1 and B += 1  
+truth = 0 and imputed = 2: C += 2  
+truth = 1 and imputed = 2: A += 1 and C += 1  
+truth = 2 and imputed = 2: A += 2  
 
 Then
 
