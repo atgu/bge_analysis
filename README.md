@@ -5,7 +5,7 @@
 BGE Analysis paper now on BioRXiv! 
 https://www.biorxiv.org/content/10.1101/2024.09.06.611689v1
 
-For Broad Institute researchers looking to impute BGE data using GLIMPSE2, please see the `imputation` directory, which contains a few sub-directories:
+For Broad Institute researchers looking to impute BGE data using GLIMPSE2, please see the `imputation` directory, which contains the following sub-directories:
 
 - `glimpse_hail_batch` includes the fully documented and fully automated code for running autosomes and X chromosome imputation using GLIMPSE2 on BGE data, it assumes input files are stored in a Google Cloud bucket. For anyone working within the Broad Institute and with access to Hail Batch, these scripts should be the primary starting point for imputation. 
 - `BGEpaper_scripts` includes the scripts used for the imputation of the data in the BGE paper. These scripts performs the same tasks as the `glimpse_hail_batch` scripts but requires more onus on the user for providing input paths and pre-splitting batches into groups of 200 individuals.
