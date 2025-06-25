@@ -27,9 +27,9 @@ truth = 2 and imputed = 2: A += 2
 
 Then
 
-Sensitivity = true positives / (true positives + false negatives) = A / (A+B). (NOTE that the total number of ALT alleles in the array data is A+B)  
-Precision = true positives / (true positives + false positives) = A / (A+C)  
-Non-reference concordance = A / (A+B+C). To see why, consider the denominator to be the total number of ALT alleles called the either array/truth dataset or imputed dataset, i.e. (A+B+C). The numerator is where they agree, i.e. A.  
+`Sensitivity` = true positives / (true positives + false negatives) = A / (A+B). (NOTE that the total number of ALT alleles in the array data is A+B)  
+`Precision` = true positives / (true positives + false positives) = A / (A+C)  
+`Non-reference concordance` = A / (A+B+C). To see why, consider the denominator to be the total number of ALT alleles called the either array/truth dataset or imputed dataset, i.e. (A+B+C). The numerator is where they agree, i.e. A.  
 
 This script requires the following python packages to be installed:
 1. Pandas
