@@ -19,3 +19,5 @@ For those outside of the Broad Institute who would like to run imputation using 
 The `concordance` directory contains scripts used in computing non-reference concordance and aggregated R2 metrics of BGE imputed SNPs with Global Screening Array chip data used as ground truth, as shown in the manuscript. 
 
 The `exome-qc` directory contains python and R scripts for generating the QC metrics of BGE data and corresponding plots, as shown in the manuscript. 
+
+For calling CNVs on BGE data, please see the repository here: https://github.com/broadinstitute/gatk/tree/4.1.0.0/scripts/cnv_wdl/germline 
