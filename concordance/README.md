@@ -1,3 +1,36 @@
+We used two main metrics for evaluating GLIMPSE's imputation accuracy:
+
+1. Concordance (including sensitivity, precision, and non-reference concordance)
+2. Aggregate R2 (squared Pearson's correlation)
+
+How is concordance calculated? 
+
+For each SNP, we can create the following contingency table:
+
+|            |              | **Imputed**        | **Imputed**        |
+|------------|--------------|--------------------|--------------------|
+|            |              | ALT (1)            | REF (0)            |
+| **truth**  | ALT (1)      | true positive (A)  | false negative (B) |
+| **truth**  | REF (0)      | false positive (C) | true negative (D)  |
+
+Let 1 = ALT and 0 = REF, then we have the following cases:
+
+truth = 0 and imputed = 0: D += 2
+truth = 1 and imputed = 0: D += 1 and B += 1
+truth = 2 and imputed = 0: B += 1
+truth = 0 and imputed = 1: D += 1 and C += 1
+truth = 1 and imputed = 1: A += 1 and D += 1
+truth = 2 and imputed = 1: A += 1 and B += 1
+truth = 0 and imputed = 2: C += 2
+truth = 1 and imputed = 2: A += 1 and C += 1
+truth = 2 and imputed = 2: A += 2
+
+Then
+
+Sensitivity = true positives / (true positives + false negatives) = A / (A+B). (NOTE that the total number of ALT alleles in the array data is A+B)
+Precision = true positives / (true positives + false positives) = A / (A+C)
+Non-reference concordance = A / (A+B+C). To see why, consider the denominator to be the total number of ALT alleles called the either array/truth dataset or imputed dataset, i.e. (A+B+C). The numerator is where they agree, i.e. A.
+
 This script requires the following python packages to be installed:
 1. Pandas
 2. Numpy
