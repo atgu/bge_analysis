@@ -12,7 +12,7 @@ For Broad Institute researchers looking to impute BGE data using GLIMPSE2, pleas
 
 - `glimpse_hail_batch` includes the fully documented and fully automated code for running autosomes and X chromosome imputation using GLIMPSE2 on BGE data, it assumes input files are stored in a Terra or Google Cloud bucket. For anyone working within the Broad Institute and with access to Hail Batch, these scripts should be the starting point for imputation.
   
-  The following two sub-directories are included as archival references of the imputation work done during manuscript development. They are not recommended for general use, as they lack the automation and robust documentation of the current `glimpse_hail_batch` implementation:
+  The following two sub-directories are included as archival references of the imputation work done during manuscript development. They are not recommended for general use, as they lack the automation and robust documentation of the current `glimpse_hail_batch` implementation:  
   
 - `BGEpaper_scripts` includes the scripts used for the imputation of the data in the BGE paper. These scripts perform the same tasks as the `glimpse_hail_batch` scripts but requires more onus on the user for providing input paths and pre-splitting batches into groups of 200 individuals.
 - `glimpse_comparison` includes the initial scripts used in implementing GLIMPSE2 on Hail Batch and testing the GLIMPSE parameters on a subset of BGE data.
