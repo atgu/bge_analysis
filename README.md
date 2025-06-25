@@ -25,7 +25,7 @@ The `concordance` directory contains scripts used in computing non-reference con
 
 ---
 
-The `exome-qc` directory contains python and R scripts for generating the QC metrics of BGE data and corresponding plots, as shown in the manuscript. 
+The `exome_qc` directory contains python and R scripts for generating the QC metrics of BGE data and corresponding plots, as shown in the manuscript. 
 
 ---
 
