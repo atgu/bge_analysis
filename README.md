@@ -5,6 +5,7 @@
 
 BGE Analysis paper now on BioRXiv! 
 https://www.biorxiv.org/content/10.1101/2024.09.06.611689v1
+
 ---
 
 For Broad Institute researchers looking to impute BGE data using GLIMPSE2, please see the `imputation` directory, which contains the following sub-directories:
@@ -17,6 +18,7 @@ For Broad Institute researchers looking to impute BGE data using GLIMPSE2, pleas
 - `glimpse_comparison` includes the initial scripts used in implementing GLIMPSE2 on Hail Batch and testing the GLIMPSE parameters on a subset of BGE data.
 
 For those outside of the Broad Institute who would like to run imputation using GLIMPSE2 on BGE data, Hail Batch is unfortunately not an option that is currently available. We recommend following the WDL provided here instead: https://github.com/broadinstitute/palantir-workflows/tree/main/GlimpseImputationPipeline 
+
 ---
 
 The `concordance` directory contains scripts used in computing non-reference concordance and aggregated R2 metrics of BGE imputed SNPs with Global Screening Array chip data used as ground truth, as shown in the manuscript. 
