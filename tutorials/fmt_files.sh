@@ -2,23 +2,17 @@
 
 #plink commands to prepare genetics files for PRS-CS
 
-#update sex
-plink2 --bfile AAU --update-sex AAU_sex.tsv --make-bed --out AAU_updated_sex
-
-#update phenotypes
-plink2 --bfile AAU_updated_sex --pheno AAU_role.tsv --make-bed --out AAU_updated_pheno
-
 #remove genotypes with >5% missingness
-plink2 --bfile AAU_updated_pheno --geno 0.05 --make-bed --out AAU_prs_qc1
+plink2 --bfile Uganda --geno 0.05 --make-bed --out Uganda_prs_qc1
 
 #remove samples with >5% missingness
-plink2 --bfile AAU_prs_qc1 --mind 0.05 --make-bed --out AAU_prs_qc2
+plink2 --bfile Uganda_prs_qc1 --mind 0.05 --make-bed --out Uganda_prs_qc2
 
 #get per-chromosome plink files for PRS-CS
 for c in {1..22};
 do
 
-    ~/Desktop/apps/plink2 --bfile AAU_prs_qc2 --chr ${c} --make-bed --out AAU_prs_chr${c}
+    ~/Desktop/apps/plink2 --bfile Uganda_prs_qc2 --chr ${c} --make-bed --out Uganda_prs_chr${c}
 
 done
 
