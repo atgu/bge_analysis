@@ -72,7 +72,7 @@ expnull <- "1"
 exp0 <- paste0("SEX + AGE + ",paste0(pcvecs, collapse = " + "))
 exp1 <- paste0("ZSCORE + SEX + AGE + ", (paste0(pcvecs, collapse = " + ")))
 
-scorefile <- fread("AAU_scores.sscore")
+scorefile <- fread("Uganda_scores.sscore")
 head(scorefile)
 
 pc_file <- fread("~/Desktop/bge_analysis/neuroGAP/neurogap_all_sites_autosomes_pcscores.txt")
@@ -81,7 +81,7 @@ pc_file$IID <- gsub("_", "-",pc_file$IID)
 pc_file$IID <- gsub("\\.", "-",pc_file$IID)
 head(pc_file)
 
-fam_file <- fread("~/Desktop/bge_analysis/PGS/neuroGAP_PGS/forWiki/plink/AAU_prs_qc2.fam")
+fam_file <- fread("~/Desktop/bge_analysis/PGS/neuroGAP_PGS/forWiki/plink/Uganda_prs_qc2.fam")
 colnames(fam_file) <- c("FID","IID","MID","PID","SEX","PHENO")
 fam_file$MID <- NULL
 fam_file$PID <- NULL
@@ -95,7 +95,7 @@ manifest.df <- fread("~/Desktop/bge_analysis/BGE_HailCallset_Wave2_Manifest_0220
 levels(as.factor(manifest.df$COHORT))
 
 #subset to the project of interest (in our case "NeuroGAP-Psychosis_AAU")
-manifest.sub <- subset(manifest.df, manifest.df$COHORT == "NeuroGAP-Psychosis_AAU")
+manifest.sub <- subset(manifest.df, manifest.df$COHORT == "NeuroGAP-Psychosis_Uganda")
 manifest.sub$IID <- gsub(" ", "-",manifest.sub$SUBJECT_ID)
 manifest.sub$IID <- gsub("_", "-",manifest.sub$IID)
 manifest.sub$IID <- gsub("\\.", "-",manifest.sub$IID)
@@ -151,7 +151,7 @@ names(res) <- c("N", "K", "P",
                 "auc1", "auc1_2.5", "auc1_97.5", 
                 "auc2", "auc2_2.5", "auc2_97.5","GLM1_Beta","GLM2_Beta")
 
-fwrite(res, file = "AAU_PGC3_SCZ_results.txt", sep = "\t")
+fwrite(res, file = "Uganda_PGC3_SCZ_results.txt", sep = "\t")
 
 
 
@@ -162,7 +162,7 @@ prs$PHENO1 <- factor(prs$PHENO1, levels = c(0, 1), labels = c("Control", "Case")
 box.p <- ggplot(prs, aes(x = PHENO1, y = ZSCORE, fill = PHENO1)) +
   geom_boxplot() +
   scale_fill_manual(values = c("#619CFF", "#F8766D")) +
-  labs(x = expression(bold("Status")), y = expression(bold("PRS-CS Z Score"))) +
+  labs(x = expression(bold("Phenotype")), y = expression(bold("PRS-CS Z Score"))) +
   theme_minimal() +
   theme(
     axis.title = element_text(face = "bold"),
@@ -183,7 +183,7 @@ hist.p <- ggplot(prs, aes(ZSCORE, group = PHENO1, color = PHENO1)) +
     axis.text.y = element_text(face = "bold", size = 14, color = "black"),
     axis.title = element_text(size = 16, face = "bold")
   ) +
-  labs(color = "Status")  # Update legend label
+  labs(color = "Phenotype")  # Update legend label
 
 hist.p
 
