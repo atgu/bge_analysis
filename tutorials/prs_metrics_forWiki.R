@@ -135,7 +135,7 @@ P <- prs[PHENO1 == 1, .N] / N ##proportion of cases
 
 h2l_NKr2 <- h2l_R2s(K, NKr2, P)
 
-results <- boot(prs, boot_function, R = 1000)
+results <- boot(prs, boot_function, R = 100)
 
 NKr2_2.5 <- round(boot.ci(results, type ="perc", index = 1)[[4]][1,][4], 6)
 NKr2_97.5 <- round(boot.ci(results, type ="perc", index = 1)[[4]][1,][5], 6)
