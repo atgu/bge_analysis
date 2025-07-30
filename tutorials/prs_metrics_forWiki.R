@@ -111,6 +111,9 @@ prs <- merge(prs,pc_file,by="IID")
 prs <- merge(prs,age.df,by="IID")
 prs$`#FID` <- NULL
 
+#remove individuals with missing phenotype (plink coding for missing is -9) 
+prs <- subset(prs, !(prs$PHENO == -9))
+
 #PHENO uses plink coding 1=control, 2=case
 #lets change PHENO1 to be 0=control, 1=case
 prs$PHENO1 <- prs$PHENO - 1
