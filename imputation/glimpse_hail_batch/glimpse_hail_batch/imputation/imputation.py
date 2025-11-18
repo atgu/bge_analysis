@@ -336,7 +336,7 @@ async def impute(args: dict):
                                                 batch_regions,
                                                 args['use_checkpoints'],
                                                 contig,
-                                                len(chunks))
+                                                len(chunks) * 5)
 
         if union_j is not None:
             union_j.depends_on(*union_ligate_input_jobs.get(contig, []))

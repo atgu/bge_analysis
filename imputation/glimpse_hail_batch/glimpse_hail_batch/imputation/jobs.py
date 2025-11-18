@@ -489,6 +489,8 @@ hailctl config set batch/regions "{','.join(regions)}"
     mt_init = hl.read_matrix_table(paths[0])
     intervals = mt_init._calculate_new_partitions(n_partitions)
 
+    last_mt_left = None
+
     mt_left = hl.read_matrix_table(paths[0], _intervals=intervals)
     mt_left = add_info_if_needed(mt_left)
     mt_left = mt_left.annotate_rows(
@@ -509,6 +511,12 @@ hailctl config set batch/regions "{','.join(regions)}"
         mt_left = mt_left.union_cols(mt_right,
                                      drop_right_row_fields=False,
                                      row_join_type='outer')
+
+        if idx % 5 == 0:
+            mt_left = mt_left.persist()
+            if last_mt_left is not None:
+                last_mt_left.unpersist()
+            last_mt_left = mt_left
 
     mt = mt_left
 
