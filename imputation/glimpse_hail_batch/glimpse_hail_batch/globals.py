@@ -315,7 +315,7 @@ def find_crams(sample_manifest: str,
                cram_path_col: str,
                cram_index_path_col: str,
                sex_col: Optional[str],
-               female_code: Optional[str],
+               male_code: Optional[str],
                n_samples: Optional[int]) -> List[Sample]:
     with hfs.open(sample_manifest, 'r') as f:
         manifest = pd.read_csv(io.StringIO(f.read()), sep='\t')
@@ -325,7 +325,7 @@ def find_crams(sample_manifest: str,
     cram_index_paths = manifest[cram_index_path_col].to_list()
 
     if sex_col is not None:
-        is_females = [sex == female_code for sex in manifest[sex_col].to_list()]
+        is_females = [sex != male_code for sex in manifest[sex_col].to_list()]
     else:
         is_females = [True] * len(sample_ids)
 

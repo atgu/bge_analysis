@@ -6,23 +6,28 @@ import hailtop.batch_client.aioclient as bc
 from hailtop.batch.job import Job
 import hailtop.fs as hfs
 
+from .utils import ImputationJobGroup, ImputationJobSubmitter
 from ..globals import Chunk, SampleGroup, get_bucket
 
 
-def copy_temp_crams_job(b: hb.Batch,
-                        jg: hb.JobGroup,
-                        sample_group: SampleGroup,
-                        start: int,
-                        end: int,
-                        cpu: int,
-                        memory: str) -> Job:
+async def copy_temp_crams_job(b: ImputationJobSubmitter,
+                              jg: ImputationJobGroup,
+                              sample_group: SampleGroup,
+                              start: int,
+                              end: int,
+                              cpu: int,
+                              memory: str) -> Job:
     # this job is idempotent because we use the -n or no-clobber option
+    name = f'copy/sample-group-{sample_group.sample_group_index}/{start}-{end}'
+    maybe_j = await get_already_submitted_job(jg, name)
+    if maybe_j is not None:
+        return maybe_j
 
     copy_list = sample_group.write_gcloud_cram_copy_list(start, end)
     copy_list_input = b.read_input(copy_list)
 
-    j = jg.new_bash_job(name=f'copy/sample-group-{sample_group.sample_group_index}/{start}-{end}',
-                        attributes={'task': 'copy'})
+    j = await jg.new_bash_job(name=name,
+                              attributes={'task': 'copy'})
     j.image('google/cloud-sdk:512.0.0-slim')
 
     copy = f'cat {copy_list_input} | gcloud storage cp -n -I {sample_group.remote_cram_temp_dir}'
@@ -37,6 +42,25 @@ possible_resources = []
 for cpu in (1, 2, 4, 8, 16):
     for memory in ('lowmem', 'standard', 'highmem'):
         possible_resources.append((cpu, memory))
+
+
+async def get_already_submitted_job(jg: ImputationJobGroup, name: str) -> Optional[hb.Job]:
+    if jg._new_submission:
+        return None
+
+    if jg._batch is None:
+        return None
+
+    if jg._batch._async_batch is None:
+        return None
+
+    jobs = [j async for j in jg._batch._async_batch.jobs(f'name = {name}', version=2)]
+
+    if len(jobs) != 0:
+        assert len(jobs) == 1
+        return jg.get_job(jobs[0]['job_id'])
+    assert len(jobs) == 0
+    return None
 
 
 class JobInfo:
@@ -58,7 +82,8 @@ class JobInfo:
     def should_be_rerun(self):
         return self.is_oom() or self.state in ('Failed', 'Error')
 
-    async def resubmit_with_more_resources(self, jg: bc.JobGroup) -> Optional[hb.Job]:
+    async def resubmit(self, jg: bc.JobGroup, more_resources: bool) -> Optional[hb.Job]:
+        """We also remove the checkpoint file in case it is corrupted."""
         global resources
 
         j = await jg._batch.get_job(self.job_id)
@@ -72,7 +97,12 @@ class JobInfo:
         if resource_index == -1 or resource_index == len(possible_resources) - 1:
             return None
 
-        new_cpu, new_memory = possible_resources[resource_index + 1]
+        if more_resources:
+            new_resource_index = resource_index + 1
+        else:
+            new_resource_index = resource_index
+
+        new_cpu, new_memory = possible_resources[new_resource_index]
 
         resources = {
             'cpu': str(new_cpu),
@@ -96,6 +126,12 @@ class JobInfo:
         cloudfuse = spec.get('gcsfuse')
         if cloudfuse is not None:
             cloudfuse = [(mount['bucket'], mount['mount_path'], mount['read_only']) for mount in spec['gcsfuse']]
+
+        checkpoint_file = attributes.get('checkpoint_file')
+        if checkpoint_file is not None and hfs.is_file(checkpoint_file):
+            hfs.remove(checkpoint_file)
+            with hfs.open(checkpoint_file, 'wb') as f:
+                f.write(b"")
 
         j = jg.create_job(spec['process']['image'],
                           spec['process']['command'],
@@ -125,6 +161,7 @@ def heal(contig: str, billing_project: str, remote_tmpdir: str, max_attempts: in
 
     batch_id = int(os.environ['HAIL_BATCH_ID'])
     job_group_id = int(os.environ['HAIL_JOB_GROUP_ID'])
+    n_expected_chunks = int(os.environ['N_CHUNKS'])
 
     backend = hb.ServiceBackend(billing_project=billing_project, remote_tmpdir=remote_tmpdir)
     b = hb.Batch.from_batch_id(batch_id, backend=backend)
@@ -132,17 +169,19 @@ def heal(contig: str, billing_project: str, remote_tmpdir: str, max_attempts: in
 
     PHASE_JOB_NAME_REGEX = re.compile(f'^phase/.*/{contig}/.*')
 
+    print(f'expecting {n_expected_chunks} chunks')
+
     async def _heal(b, jg):
         b_bc = b._async_batch
         jg_bc = jg._async_job_group
 
         while True:
-            print('healing jobs...')
+            print('healing jobs...', flush=True)
 
             job_info = [JobInfo.from_json(j) async for j in jg_bc.jobs()
                         if PHASE_JOB_NAME_REGEX.fullmatch(j['name']) is not None]
 
-            print(f'found {len(job_info)} attempts')
+            print(f'found {len(job_info)} attempts', flush=True)
 
             n_attempts = Counter(j.name for j in job_info)
 
@@ -154,10 +193,10 @@ def heal(contig: str, billing_project: str, remote_tmpdir: str, max_attempts: in
                     latest_attempts[job.name] = job
                     job.attempt_number = n_attempts[job.name]
 
-            all_completed = all(j.state in ('Cancelled', 'Success') or (j.attempt_number >= max_attempts and j.state in ('Error', 'Failed'))
-                                for j in latest_attempts.values())
+            all_queued_have_completed = all(j.state in ('Cancelled', 'Success') or (j.attempt_number >= max_attempts and j.state in ('Error', 'Failed'))
+                                            for j in latest_attempts.values())
 
-            if all_completed:
+            if all_queued_have_completed and len(latest_attempts) == n_expected_chunks:
                 all_succeeded = all(j.state == 'Success' for j in latest_attempts.values())
                 if all_succeeded:
                     return
@@ -166,66 +205,82 @@ def heal(contig: str, billing_project: str, remote_tmpdir: str, max_attempts: in
             should_resubmit = False
             for j in latest_attempts.values():
                 if j.attempt_number < max_attempts and j.should_be_rerun():
-                    print(f'resubmitting job {j.job_id} {j.name} with attempt number {j.attempt_number + 1}')
-                    await j.resubmit_with_more_resources(jg_bc)
+                    print(f'resubmitting job {j.job_id} {j.name} with attempt number {j.attempt_number + 1}', flush=True)
+                    more_resources = j.is_oom()
+                    await j.resubmit(jg_bc, more_resources=more_resources)
                     should_resubmit |= True
 
             if should_resubmit:
                 await b_bc.submit()
 
+            print(f'sleep for 1 minute', flush=True)
             await asyncio.sleep(60)
 
     asyncio.run(_heal(b, jg))
 
 
-def heal_phase_jobs(b: hb.Batch,
-                    jg: hb.JobGroup,
-                    sample_group: SampleGroup,
-                    contig: str,
-                    docker: str,
-                    billing_project: str,
-                    remote_tmpdir: str,
-                    max_attempts: int = 2) -> hb.Job:
-    j = jg.new_python_job(name=f'phase-heal/sample-group-{sample_group.sample_group_index}/{contig}')
+async def heal_phase_jobs(b: ImputationJobSubmitter,
+                          jg: ImputationJobGroup,
+                          sample_group: SampleGroup,
+                          contig: str,
+                          n_chunks: int,
+                          docker: str,
+                          billing_project: str,
+                          remote_tmpdir: str,
+                          max_attempts: int = 2) -> Optional[hb.Job]:
+    name = f'phase-heal/sample-group-{sample_group.sample_group_index}/{contig}'
+
+    maybe_j = await get_already_submitted_job(jg, name)
+    if maybe_j is not None:
+        return maybe_j
+
+    j = await jg.new_python_job(name=name)
+    j.env('N_CHUNKS', str(n_chunks))
     j.image(docker)
     j.cpu(0.25)
     j.call(heal, contig, billing_project, remote_tmpdir, max_attempts)
     return j
 
 
-def phase(b: hb.Batch,
-          jg: hb.JobGroup,
-          output_file: str,
-          phase_file_exists: bool,
-          sample_group: SampleGroup,
-          chunk: Chunk,
-          cram_remote_tmp_path: str,
-          mount_point: str,
-          crams_list: hb.ResourceFile,
-          glimpse_remote_checkpoint_file: str,
-          fasta: hb.ResourceGroup,
-          sample_ploidy_list: hb.ResourceFile,
-          docker: str,
-          cpu: int,
-          memory: str,
-          use_checkpoint: bool,
-          impute_reference_only_variants: bool,
-          call_indels: bool,
-          n_burn_in: Optional[int],
-          n_main: Optional[int],
-          effective_population_size: Optional[int]) -> Optional[Job]:
+async def phase(b: ImputationJobSubmitter,
+                jg: ImputationJobGroup,
+                output_file: str,
+                phase_file_exists: bool,
+                sample_group: SampleGroup,
+                chunk: Chunk,
+                cram_remote_tmp_path: str,
+                mount_point: str,
+                crams_list: hb.ResourceFile,
+                glimpse_remote_checkpoint_file: str,
+                fasta: hb.ResourceGroup,
+                sample_ploidy_list: hb.ResourceFile,
+                docker: str,
+                cpu: int,
+                memory: str,
+                use_checkpoint: bool,
+                impute_reference_only_variants: bool,
+                call_indels: bool,
+                n_burn_in: Optional[int],
+                n_main: Optional[int],
+                effective_population_size: Optional[int]) -> Optional[Job]:
     sample_group_index = sample_group.sample_group_index
+
+    name = f'phase/sample-group-{sample_group_index}/{chunk.chunk_contig}/{chunk.chunk_idx}'
+    maybe_j = await get_already_submitted_job(jg, name)
+    if maybe_j is not None:
+        return maybe_j
 
     glimpse_checkpoint_file_input = b.read_input(glimpse_remote_checkpoint_file)
 
     if use_checkpoint and phase_file_exists:
         return None
 
-    j = jg.new_bash_job(name=f'phase/sample-group-{sample_group_index}/{chunk.chunk_contig}/{chunk.chunk_idx}',
-                        attributes={'sample-group-index': str(sample_group_index),
-                                    'contig': str(chunk.chunk_contig),
-                                    'chunk-index': str(chunk.chunk_idx),
-                                    'task': 'phase'})
+    j = await jg.new_bash_job(name=name,
+                              attributes={'sample-group-index': str(sample_group_index),
+                                          'contig': str(chunk.chunk_contig),
+                                          'chunk-index': str(chunk.chunk_idx),
+                                          'task': 'phase',
+                                          'checkpoint_file': glimpse_remote_checkpoint_file})
 
     j.image(docker)
     j.storage('20Gi')
@@ -301,23 +356,28 @@ touch {j.phased.coverage_metrics}
     return j
 
 
-def ligate(b: hb.Batch,
-           jg: hb.JobGroup,
-           sample_group: SampleGroup,
-           contig: str,
-           docker: str,
-           cpu: int,
-           memory: str,
-           storage: str,
-           chunk_outputs: List[hb.ResourceGroup],
-           output_file: str,
-           ref_dict: hb.ResourceFile,
-           use_checkpoint: bool) -> Optional[Job]:
+async def ligate(b: ImputationJobSubmitter,
+                 jg: ImputationJobGroup,
+                 sample_group: SampleGroup,
+                 contig: str,
+                 docker: str,
+                 cpu: int,
+                 memory: str,
+                 storage: str,
+                 chunk_outputs: List[hb.ResourceGroup],
+                 output_file: str,
+                 ref_dict: hb.ResourceFile,
+                 use_checkpoint: bool) -> Optional[Job]:
     if use_checkpoint and hfs.exists(output_file + '.vcf.bgz'):
         return None
 
-    j = jg.new_bash_job(name=f'ligate/sample-group-{sample_group.sample_group_index}/{contig}',
-                        attributes={'task': 'ligate'})
+    name = f'ligate/sample-group-{sample_group.sample_group_index}/{contig}'
+    maybe_j = await get_already_submitted_job(jg, name)
+    if maybe_j is not None:
+        return maybe_j
+
+    j = await jg.new_bash_job(name=name,
+                              attributes={'task': 'ligate'})
     j.image(docker)
     j.cpu(cpu)
     j.memory(memory)
@@ -363,12 +423,17 @@ touch {j.ligated.tbi}  # this is a dummy operation; todo to figure out why this 
     return j
 
 
-def delete_temp_files_job(b: hb.Batch,
-                          jg: hb.JobGroup,
-                          sample_group: SampleGroup,
-                          save_checkpoints: bool) -> Job:
-    j = jg.new_bash_job(attributes={'name': f'delete/sample-group-{sample_group.sample_group_index}',
-                                    'task': 'delete'})
+async def delete_temp_files_job(b: ImputationJobSubmitter,
+                                jg: ImputationJobGroup,
+                                sample_group: SampleGroup,
+                                save_checkpoints: bool) -> Job:
+    name = f'delete/sample-group-{sample_group.sample_group_index}'
+    maybe_j = await get_already_submitted_job(jg, name)
+    if maybe_j is not None:
+        return maybe_j
+
+    j = await jg.new_bash_job(attributes={'name': name,
+                                          'task': 'delete'})
     j.cpu(1)
     j.image('google/cloud-sdk:512.0.0-slim')
 
@@ -388,9 +453,14 @@ def delete_temp_files_job(b: hb.Batch,
     return j
 
 
-def write_success(b: hb.Batch, jg: hb.JobGroup, sample_group: SampleGroup, docker: str) -> Job:
-    j = jg.new_bash_job(attributes={'name': f'write-success/sample-group-{sample_group.sample_group_index}',
-                                    'task': 'write-success'})
+async def write_success(b: ImputationJobSubmitter, jg: ImputationJobGroup, sample_group: SampleGroup, docker: str) -> Job:
+    name = f'write-success/sample-group-{sample_group.sample_group_index}'
+    maybe_j = await get_already_submitted_job(jg, name)
+    if maybe_j is not None:
+        return maybe_j
+
+    j = await jg.new_bash_job(attributes={'name': name,
+                                          'task': 'write-success'})
     j.cpu(1)
     j.image(docker)
     j.command(f'''
@@ -421,22 +491,27 @@ def _vcf_to_mt(input_vcf: str, output_path: str, cpu: int):
     mt.write(output_path, overwrite=True)
 
 
-def vcf_to_mt(b: hb.Batch,
-              jg: hb.JobGroup,
-              sample_group: SampleGroup,
-              input_vcf: str,
-              output_path: str,
-              contig: str,
-              docker: str,
-              cpu: int,
-              memory: str,
-              storage: str,
-              use_checkpoint: bool) -> Optional[Job]:
+async def vcf_to_mt(b: ImputationJobSubmitter,
+                    jg: ImputationJobGroup,
+                    sample_group: SampleGroup,
+                    input_vcf: str,
+                    output_path: str,
+                    contig: str,
+                    docker: str,
+                    cpu: int,
+                    memory: str,
+                    storage: str,
+                    use_checkpoint: bool) -> Optional[Job]:
+    name = f'vcf-to-mt/sample-group-{sample_group.sample_group_index}/{contig}'
+    maybe_j = await get_already_submitted_job(jg, name)
+    if maybe_j is not None:
+        return maybe_j
+
     if use_checkpoint and hfs.exists(output_path + '/_SUCCESS'):
         return None
 
-    j = jg.new_python_job(attributes={'name': f'vcf-to-mt/sample-group-{sample_group.sample_group_index}/{contig}',
-                                      'task': 'vcf-to-mt'})
+    j = await jg.new_python_job(attributes={'name': name,
+                                            'task': 'vcf-to-mt'})
     j.cpu(cpu)
     j.image(docker)
     j.storage(storage)
@@ -549,27 +624,33 @@ hailctl config set batch/regions "{','.join(regions)}"
         hl.export_vcf(mt, output_path, tabix=True)
 
 
-def union_sample_groups_from_vcfs(b: hb.Batch,
-                                  jg: hb.JobGroup,
-                                  vcf_paths: hb.ResourceFile,
-                                  output_path: str,
-                                  docker: str,
-                                  cpu: int,
-                                  memory: str,
-                                  storage: str,
-                                  billing_project: str,
-                                  remote_tmpdir: str,
-                                  regions: List[str],
-                                  use_checkpoints: bool,
-                                  contig: str,
-                                  n_partitions: int) -> Optional[Job]:
+async def union_sample_groups_from_vcfs(b: ImputationJobSubmitter,
+                                        jg: ImputationJobGroup,
+                                        vcf_paths: hb.ResourceFile,
+                                        output_path: str,
+                                        docker: str,
+                                        cpu: int,
+                                        memory: str,
+                                        storage: str,
+                                        billing_project: str,
+                                        remote_tmpdir: str,
+                                        regions: List[str],
+                                        use_checkpoints: bool,
+                                        contig: str,
+                                        n_partitions: int) -> Optional[Job]:
+    name = f'union/{contig}'
+
+    maybe_j = await get_already_submitted_job(jg, name)
+    if maybe_j is not None:
+        return maybe_j
+
     if use_checkpoints:
         if output_path.endswith('.vcf.bgz') and hfs.exists(output_path):
             return None
         if output_path.endswith('.mt') and hfs.exists(output_path + '/_SUCCESS'):
             return None
 
-    j = jg.new_python_job(attributes={'name': f'union/{contig}'})
+    j = await jg.new_python_job(attributes={'name': name})
     j.cpu(cpu)
     j.image(docker)
     j.storage(storage)

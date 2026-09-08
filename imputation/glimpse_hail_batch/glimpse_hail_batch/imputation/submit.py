@@ -34,6 +34,7 @@ async def submit(args):
         b = hb.Batch(name=args['batch_name'], backend=backend)
 
     j = b.new_bash_job(name='submit-jobs')
+    j.spot(False)  # don't want this to get restarted if possible
     j.image(args['docker_hail'])
 
     await copy_from_dict(
@@ -83,7 +84,7 @@ if __name__ == '__main__':
     parser.add_argument('--cram-path-col', type=str, required=True)
     parser.add_argument('--cram-index-path-col', type=str, required=True)
     parser.add_argument('--sex-col', type=str, required=False)
-    parser.add_argument('--female-code', type=str, required=False)
+    parser.add_argument('--male-code', type=str, required=False)
 
     parser.add_argument('--n-samples', type=int, required=False)
 
@@ -103,6 +104,8 @@ if __name__ == '__main__':
     parser.add_argument('--use-checkpoints', action='store_true', required=False)
     parser.add_argument('--save-checkpoints', action='store_true', required=False)
     parser.add_argument('--always-delete-temp-files', action='store_true', required=False)
+    parser.add_argument('--max-jobs-in-flight', type=int, default=1000)
+    parser.add_argument('--ramp-up-minutes', type=int, default=75)
 
     # Extra phase arguments
     parser.add_argument('--phase-cpu', type=int, required=True)
@@ -135,6 +138,9 @@ if __name__ == '__main__':
     parser.add_argument('--non-par-contigs', type=str, required=False)
 
     args = vars(parser.parse_args())
+
+    if not args['use_checkpoints'] or not args['save_checkpoints']:
+        raise ValueError('not tested without using checkpoints. Specify to --use-checkpoints and --save-checkpoints')
 
     print('submitting jobs with the following parameters:')
     print(json.dumps(args, indent=4))
